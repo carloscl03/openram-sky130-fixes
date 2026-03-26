@@ -34,15 +34,22 @@ Scales to larger memories — fixes are geometry-driven, not hardcoded.
 ## Quickstart
 
 ```bash
-# Inside the Docker container (iic-osic-tools_chipathon_xserver)
-export PATH=/foss/tools/bin:$PATH
-cd /foss/designs/OpenRAM
+# 1. Go to the repo root (wherever you cloned it)
+cd /path/to/OpenRAM
 
-# Copy and edit the reference config
+# 2. Copy and customise the reference config
 cp sky130/configs/sram_8x8_sky130.py sky130/configs/my_sram.py
 # → change word_size, num_words, output_name
 
-# Compile + validate (DRC + LVS run automatically)
+# 3. Compile + validate (DRC + LVS run automatically)
+python3 sram_compiler.py sky130/configs/my_sram.py
+```
+
+Docker (`iic-osic-tools_chipathon_xserver`):
+
+```bash
+export PATH=/foss/tools/bin:$PATH
+cd /foss/designs/OpenRAM
 python3 sram_compiler.py sky130/configs/my_sram.py
 ```
 
@@ -51,6 +58,28 @@ Or with `make`:
 ```bash
 make -f sky130/Makefile.sky130 compile CONFIG=sky130/configs/my_sram.py
 ```
+
+> **Important:** always use `sram_compiler.py`, never run the config file directly.
+> It sets `OPENRAM_HOME` to the local `compiler/` directory so the patched code
+> is used instead of any system-installed `openram` package.
+
+---
+
+## Output files
+
+After a successful compilation, all outputs land in `temp/` (created automatically,
+**gitignored** — it will not appear in `git status`):
+
+| File | Contents |
+|------|----------|
+| `temp/<name>.gds` | Layout (GDS-II) — submit this for tape-out |
+| `temp/<name>.sp` | SPICE netlist |
+| `temp/<name>.lef` | Abstract LEF for place-and-route |
+| `temp/<name>.lib` | Timing model (Liberty) |
+| `temp/<name>.v` | Verilog behavioral model |
+| `temp/<name>.klayout.lyrdb` | KLayout DRC report (XML) |
+
+The `<name>` matches `output_name` in your config file.
 
 ---
 
@@ -78,6 +107,24 @@ See [patches/README.md](patches/README.md) for full instructions.
 
 ---
 
+## PDK
+
+OpenRAM needs the **sky130A PDK** at compile time. Three ways to provide it:
+
+| Setup | How |
+|-------|-----|
+| Docker `iic-osic-tools_chipathon_xserver` | Pre-installed at `/foss/pdk` — nothing to do |
+| Volare (recommended outside Docker) | `pip install volare && volare enable --pdk sky130 e8294524` |
+| Bundled `ciel/` (already in this repo) | Used automatically if `PDK_ROOT` is not set; contains the exact version (e8294524) used for validation |
+
+If you have a different PDK installation, set `PDK_ROOT` before running:
+```bash
+export PDK_ROOT=/path/to/pdks
+python3 sram_compiler.py sky130/configs/my_sram.py
+```
+
+---
+
 ## Requirements
 
 | Tool | Version tested |
@@ -88,4 +135,4 @@ See [patches/README.md](patches/README.md) for full instructions.
 | Netgen | 1.5.279 |
 | sky130A PDK (volare) | e8294524 |
 | Python | 3.12 |
-| Docker image | `iic-osic-tools_chipathon_xserver` |
+| Docker image | `iic-osic-tools_chipathon_xserver` (optional) |

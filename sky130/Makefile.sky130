@@ -1,18 +1,23 @@
 # Makefile.sky130 — Convenience targets for OpenRAM sky130 compilation
 #
-# Usage:
-#   make -f sky130/Makefile.sky130 compile CONFIG=sky130/configs/sram_8x8_sky130.py
+# Run all targets from the repo root:
+#
+#   make -f sky130/Makefile.sky130 compile
 #   make -f sky130/Makefile.sky130 compile CONFIG=sky130/configs/sram_8x8_sky130.py VERBOSE=1
 #   make -f sky130/Makefile.sky130 clean
 #   make -f sky130/Makefile.sky130 help
 #
-# Or from root with a wrapper:
-#   OPENRAM_ROOT=/foss/designs/OpenRAM make -f sky130/Makefile.sky130 compile
+# Override TOOL_BIN if Magic/KLayout/Netgen are not in /foss/tools/bin:
+#   make -f sky130/Makefile.sky130 compile TOOL_BIN=/usr/local/bin
+#
+# Override PDK_ROOT if the bundled ciel/ PDK should not be used:
+#   make -f sky130/Makefile.sky130 compile PDK_ROOT=/path/to/pdks
 
 OPENRAM_ROOT ?= $(shell git rev-parse --show-toplevel 2>/dev/null || pwd)
 PYTHON       ?= python3
 CONFIG       ?= sky130/configs/sram_8x8_sky130.py
 VERBOSE      ?= 0
+# Default to Docker tool path; override with TOOL_BIN=/your/path if needed
 TOOL_BIN     ?= /foss/tools/bin
 
 export PATH := $(TOOL_BIN):$(PATH)
@@ -43,10 +48,18 @@ drc-only:
 		echo "ERROR: $$GDS not found. Run 'make compile' first."; exit 1; \
 	fi; \
 	DRC_SCRIPT=$$(find $(OPENRAM_ROOT)/ciel -name "sky130A.lydrc" 2>/dev/null | head -1); \
-	if [ -z "$$DRC_SCRIPT" ]; then \
-		echo "ERROR: sky130A.lydrc not found under ciel/"; exit 1; \
+	if [ -z "$$DRC_SCRIPT" ] && [ -n "$$PDK_ROOT" ]; then \
+		DRC_SCRIPT=$$(find "$$PDK_ROOT" -name "sky130A.lydrc" 2>/dev/null | head -1); \
 	fi; \
-	echo "==> Running KLayout DRC on $$GDS ..."; \
+	if [ -z "$$DRC_SCRIPT" ]; then \
+		DRC_SCRIPT=$$(find $$HOME/.volare -name "sky130A.lydrc" 2>/dev/null | head -1); \
+	fi; \
+	if [ -z "$$DRC_SCRIPT" ]; then \
+		echo "ERROR: sky130A.lydrc not found."; \
+		echo "  Set PDK_ROOT=/path/to/pdks or ensure ciel/ is present."; \
+		exit 1; \
+	fi; \
+	echo "==> Running KLayout DRC on $$GDS (script: $$DRC_SCRIPT) ..."; \
 	klayout -b -r "$$DRC_SCRIPT" \
 		-rd input="$$GDS" \
 		-rd report="temp/$(CONFIG_BASE).klayout.lyrdb" \

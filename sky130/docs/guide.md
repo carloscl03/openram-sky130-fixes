@@ -5,16 +5,19 @@
 ## Running a compilation
 
 ```bash
-# Inside the Docker container (iic-osic-tools_chipathon_xserver)
+# Generic (any machine, any clone location)
+cd /path/to/OpenRAM        # wherever you cloned the repo
+python3 sram_compiler.py sky130/configs/my_sram.py
+
+# Docker (iic-osic-tools_chipathon_xserver)
 export PATH=/foss/tools/bin:$PATH
 cd /foss/designs/OpenRAM
-
 python3 sram_compiler.py sky130/configs/my_sram.py
 ```
 
 > **Important:** always use `sram_compiler.py`, never run the config file directly.
-> `sram_compiler.py` sets `OPENRAM_HOME=/foss/designs/OpenRAM/compiler`, forcing the
-> local patched code over the system-installed openram package. Running
+> `sram_compiler.py` sets `OPENRAM_HOME=<repo>/compiler`, forcing the local patched
+> code over any system-installed `openram` package. Running
 > `python3 sky130/configs/my_sram.py` directly would use the system package and
 > ignore all local fixes.
 
@@ -191,3 +194,69 @@ If `verbose_level = 0` no `info()` message is ever printed.
 | **Total** | **~335 s (~5.5 min)** |
 
 Larger memories scale roughly linearly with array area.
+
+---
+
+## Troubleshooting
+
+### Wrong directory — `sram_compiler.py` not found
+
+You must run from the **repo root**, not from a subdirectory:
+```bash
+# Wrong (will not find sram_compiler.py or load local patches):
+cd sky130/configs
+python3 sram_compiler.py my_sram.py
+
+# Correct:
+cd /path/to/OpenRAM
+python3 sram_compiler.py sky130/configs/my_sram.py
+```
+
+### `ModuleNotFoundError: No module named 'sky130'`
+
+The `technology/` directory is not on `sys.path`. This almost always means the
+config file is using a hardcoded `_tech_path`. Make sure your config derives
+the path from `__file__`:
+```python
+_openram_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_tech_path = os.path.join(_openram_root, "technology")
+```
+The reference config (`sram_8x8_sky130.py`) already does this. If you copied an
+older template, apply this change.
+
+### `klayout: command not found` or `magic: command not found`
+
+The EDA tools are not in `PATH`.
+
+- **Docker**: `export PATH=/foss/tools/bin:$PATH`
+- **Non-Docker**: add the tool install directory to `PATH`, or set
+  `check_lvsdrc = False` in your config to skip DRC/LVS during development.
+
+### `FileNotFoundError` for `sky130A.lydrc` (KLayout DRC script)
+
+OpenRAM searches for the KLayout DRC script inside the PDK. If it cannot find it:
+```bash
+# Point to your PDK installation:
+export PDK_ROOT=/path/to/pdks
+python3 sram_compiler.py sky130/configs/my_sram.py
+```
+Alternatively, the `ciel/` directory bundled in this repo contains the full sky130A
+PDK (version e8294524). OpenRAM finds it automatically when `PDK_ROOT` is unset
+and the repo root is the working directory.
+
+### DRC violations (m1.2 / m3.2) after compilation
+
+This means the local patches are not being loaded — you are running against the
+system-installed `openram` package. Verify the patches are active:
+```bash
+grep "top_inst.by()" compiler/modules/bank.py      # should match — m1.2 fix
+grep "m3_to_m3"       compiler/modules/sram_1bank.py  # should match — m3.2 fix
+```
+If either command returns no output, apply the patches from `sky130/patches/`
+(see [../patches/README.md](../patches/README.md)).
+
+### `KeyError` crash at startup (Docker with anonymous UID)
+
+Fixed by the Docker `getpwuid` patch. If you still see it, you are running the
+upstream package. Use `sram_compiler.py` from the repo root so the local
+`compiler/globals.py` is loaded.

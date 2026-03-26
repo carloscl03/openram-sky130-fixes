@@ -1,9 +1,18 @@
 # SRAM Configuration Guide — sky130
 
 A configuration file is a plain Python script that sets variables consumed by OpenRAM.
-Run it with:
+
+> **Always run from the repo root** using `sram_compiler.py` — never run the config
+> file directly with `python3`. `sram_compiler.py` sets `OPENRAM_HOME` to the local
+> `compiler/` directory, which loads the patched code instead of any system-installed
+> `openram` package.
 
 ```bash
+# Generic (any machine, any clone location)
+cd /path/to/OpenRAM        # wherever you cloned the repo
+python3 sram_compiler.py sky130/configs/my_sram.py
+
+# Docker (iic-osic-tools_chipathon_xserver)
 export PATH=/foss/tools/bin:$PATH
 cd /foss/designs/OpenRAM
 python3 sram_compiler.py sky130/configs/my_sram.py
@@ -34,7 +43,7 @@ num_r_ports  = 0   # read-only port
 num_w_ports  = 0   # write-only port
 
 output_name  = "sram_{}x{}_sky130".format(num_words, word_size)
-output_path  = "temp/"
+output_path  = "temp/"   # relative to the repo root — auto-created, gitignored
 
 # ── 2. TECHNOLOGY ────────────────────────────────────────────────────────────
 # Do not modify for sky130.
@@ -51,7 +60,10 @@ process_corners  = ["TT"]
 supply_voltages  = [1.8]
 temperatures     = [25]
 
-_tech_path = "/foss/designs/OpenRAM/technology"
+# Path-relative: works wherever the repo is cloned.
+# Layout: <repo>/sky130/configs/<file>.py  →  3 dirname() calls = repo root
+_openram_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_tech_path = os.path.join(_openram_root, "technology")
 if _tech_path not in sys.path:
     sys.path.insert(0, _tech_path)
 
@@ -109,3 +121,83 @@ use_conda = False
 - The bitcell pitch is fixed by the PDK cell. Typical area scales as
   `~(word_size + 2) × (num_words + 2) × bitcell_area`.
 - Larger memories increase compilation time roughly linearly.
+
+---
+
+## PDK location
+
+OpenRAM needs the sky130A PDK at compile time. The `technology/sky130/` directory
+inside this repo contains Python tech files and DRC scripts, but **not** the full
+foundry PDK (GDS/SPICE/LVS cells). The PDK cells come from one of these sources:
+
+| Scenario | What to do |
+|----------|-----------|
+| **Docker `iic-osic-tools_chipathon_xserver`** | PDK is pre-installed at `/foss/pdk`. Nothing to do. |
+| **Volare (recommended outside Docker)** | `pip install volare && volare enable --pdk sky130 e8294524` |
+| **Manual / already installed** | Set `PDK_ROOT=/path/to/pdks` before running. |
+| **Bundled `ciel/` inside this repo** | The `ciel/` directory ships the exact PDK version (e8294524) used during development. OpenRAM will find it automatically if `PDK_ROOT` is not set and the standard paths are absent. |
+
+The `ciel/sky130/versions/e8294524.../sky130A/` tree also contains `sky130A.lydrc`,
+the KLayout DRC script. OpenRAM searches for it automatically — you do not need to
+set any extra variable.
+
+---
+
+## Common errors and fixes
+
+### `ModuleNotFoundError: No module named 'sky130'`
+
+OpenRAM cannot find the `technology/sky130/` directory.
+
+- Make sure you are running **from the repo root**, not from `sky130/configs/`.
+- Check that `_tech_path` resolves correctly:
+  ```bash
+  python3 -c "import os; f=os.path.abspath('sky130/configs/sram_8x8_sky130.py'); \
+  print(os.path.dirname(os.path.dirname(os.path.dirname(f))))"
+  # should print the repo root
+  ```
+
+### `ModuleNotFoundError: No module named 'openram'` or wrong version loaded
+
+You ran the config file directly instead of via `sram_compiler.py`.
+
+```bash
+# Wrong:
+python3 sky130/configs/my_sram.py
+
+# Correct:
+python3 sram_compiler.py sky130/configs/my_sram.py
+```
+
+### `klayout: command not found` or `magic: command not found`
+
+The EDA tools are not in your `PATH`.
+
+- **Docker**: `export PATH=/foss/tools/bin:$PATH`
+- **Manual install**: add the install prefix to `PATH`, or set `check_lvsdrc = False`
+  to skip DRC/LVS for now.
+
+### `KeyError` on startup (Docker with anonymous UID)
+
+Fixed in `globals.py` (Fix 5 in [../docs/drc_fixes.md](../docs/drc_fixes.md)).
+If you still see it, you are running against the upstream package — use
+`sram_compiler.py` so the local patched code is loaded.
+
+### `FileNotFoundError: sky130A.lydrc` (KLayout DRC script not found)
+
+Set `PDK_ROOT` to point to your sky130A installation:
+```bash
+export PDK_ROOT=/path/to/pdks
+python3 sram_compiler.py sky130/configs/my_sram.py
+```
+Or use the bundled `ciel/` PDK by leaving `PDK_ROOT` unset when the repo is the
+working directory.
+
+### DRC fails with `m1.2` / `m3.2` violations
+
+You are running against upstream OpenRAM, not this patched version.
+Confirm the fixes are active:
+```bash
+grep "top_inst.by()" compiler/modules/bank.py
+# should print the clamp line — if empty, the patch was not applied
+```

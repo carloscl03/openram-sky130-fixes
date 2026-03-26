@@ -1,9 +1,18 @@
 """
 sram_8x8_sky130.py — Reference configuration: 8-word × 8-bit, sky130A, 1 RW port
-Usage:
+
+Usage (run from the repo root, not from this directory):
+    cd /path/to/OpenRAM            # wherever you cloned the repo
+    python3 sram_compiler.py sky130/configs/sram_8x8_sky130.py
+
+Docker (iic-osic-tools_chipathon_xserver):
     export PATH=/foss/tools/bin:$PATH
     cd /foss/designs/OpenRAM
     python3 sram_compiler.py sky130/configs/sram_8x8_sky130.py
+
+IMPORTANT: always use sram_compiler.py — never run this file directly with python3.
+sram_compiler.py sets OPENRAM_HOME to the local compiler/ directory, which loads
+the patched code instead of any system-installed openram package.
 """
 import os
 import sys
@@ -20,7 +29,8 @@ num_r_ports  = 0
 num_w_ports  = 0
 
 output_name  = "sram_8x8_sky130"
-output_path  = "temp/"
+output_path  = "temp/"          # relative to where you run sram_compiler.py
+                                # (repo root) — created automatically, gitignored
 
 # ── TECHNOLOGY ───────────────────────────────────────────────────────────────
 tech_name        = "sky130"
@@ -35,7 +45,10 @@ process_corners  = ["TT"]
 supply_voltages  = [1.8]
 temperatures     = [25]
 
-_tech_path = "/foss/designs/OpenRAM/technology"
+# Derive the repo root from this file's location — works wherever the repo is cloned.
+# Layout: <repo>/sky130/configs/sram_8x8_sky130.py  →  3 levels up = repo root
+_openram_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_tech_path = os.path.join(_openram_root, "technology")
 if _tech_path not in sys.path:
     sys.path.insert(0, _tech_path)
 
