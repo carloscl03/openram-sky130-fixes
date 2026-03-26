@@ -1,0 +1,99 @@
+# Makefile.sky130 — Convenience targets for OpenRAM sky130 compilation
+#
+# Usage:
+#   make -f sky130/Makefile.sky130 compile CONFIG=sky130/configs/sram_8x8_sky130.py
+#   make -f sky130/Makefile.sky130 compile CONFIG=sky130/configs/sram_8x8_sky130.py VERBOSE=1
+#   make -f sky130/Makefile.sky130 clean
+#   make -f sky130/Makefile.sky130 help
+#
+# Or from root with a wrapper:
+#   OPENRAM_ROOT=/foss/designs/OpenRAM make -f sky130/Makefile.sky130 compile
+
+OPENRAM_ROOT ?= $(shell git rev-parse --show-toplevel 2>/dev/null || pwd)
+PYTHON       ?= python3
+CONFIG       ?= sky130/configs/sram_8x8_sky130.py
+VERBOSE      ?= 0
+TOOL_BIN     ?= /foss/tools/bin
+
+export PATH := $(TOOL_BIN):$(PATH)
+
+# Derive output name from config file (strip path and .py)
+CONFIG_BASE  := $(notdir $(basename $(CONFIG)))
+
+.PHONY: all compile drc-only clean veryclean patch help
+
+all: compile
+
+## compile: full compilation — generates GDS, SP, LEF, LIB + runs DRC + LVS
+compile:
+	@echo "==> Compiling $(CONFIG) ..."
+	@if [ "$(VERBOSE)" = "1" ]; then \
+		$(PYTHON) $(OPENRAM_ROOT)/sram_compiler.py \
+			$(shell sed 's/verbose_level.*=.*/verbose_level = 1/' $(CONFIG) \
+			        > /tmp/_openram_verbose.py && echo /tmp/_openram_verbose.py); \
+	else \
+		$(PYTHON) $(OPENRAM_ROOT)/sram_compiler.py $(CONFIG); \
+	fi
+	@echo "==> Done. Check temp/$(CONFIG_BASE).gds and temp/$(CONFIG_BASE).log"
+
+## drc-only: run KLayout DRC on an already-generated GDS (no recompile)
+drc-only:
+	@GDS=temp/$(CONFIG_BASE).gds; \
+	if [ ! -f "$$GDS" ]; then \
+		echo "ERROR: $$GDS not found. Run 'make compile' first."; exit 1; \
+	fi; \
+	DRC_SCRIPT=$$(find $(OPENRAM_ROOT)/ciel -name "sky130A.lydrc" 2>/dev/null | head -1); \
+	if [ -z "$$DRC_SCRIPT" ]; then \
+		echo "ERROR: sky130A.lydrc not found under ciel/"; exit 1; \
+	fi; \
+	echo "==> Running KLayout DRC on $$GDS ..."; \
+	klayout -b -r "$$DRC_SCRIPT" \
+		-rd input="$$GDS" \
+		-rd report="temp/$(CONFIG_BASE).klayout.lyrdb" \
+		-rd thr=4 && \
+	echo "==> Report: temp/$(CONFIG_BASE).klayout.lyrdb"
+
+## patch: apply all sky130 patches to the local OpenRAM source
+patch:
+	@echo "==> Applying sky130 patches ..."
+	@for p in $(OPENRAM_ROOT)/sky130/patches/*.patch; do \
+		echo "  Applying $$p ..."; \
+		patch -p1 --forward --reject-file=/dev/null -d $(OPENRAM_ROOT) < "$$p" \
+			&& echo "  OK: $$p" \
+			|| echo "  SKIP (already applied or conflict): $$p"; \
+	done
+	@echo "==> Done."
+
+## clean: remove generated files from temp/
+clean:
+	@echo "==> Cleaning temp/ ..."
+	@rm -f temp/$(CONFIG_BASE).gds \
+	       temp/$(CONFIG_BASE).sp  \
+	       temp/$(CONFIG_BASE).lef \
+	       temp/$(CONFIG_BASE).lib \
+	       temp/$(CONFIG_BASE).v   \
+	       temp/$(CONFIG_BASE).log \
+	       temp/$(CONFIG_BASE).lvs.* \
+	       temp/$(CONFIG_BASE).drc.* \
+	       temp/$(CONFIG_BASE).klayout.lyrdb \
+	       temp/$(CONFIG_BASE).extracted.spice
+	@echo "==> Done."
+
+## veryclean: remove entire temp/ directory
+veryclean:
+	@echo "==> Removing temp/ ..."
+	@rm -rf temp/
+	@echo "==> Done."
+
+## help: show available targets
+help:
+	@echo ""
+	@echo "OpenRAM sky130 Makefile"
+	@echo "Usage: make -f sky130/Makefile.sky130 <target> [CONFIG=path/to/config.py]"
+	@echo ""
+	@grep -E '^## ' sky130/Makefile.sky130 | sed 's/^## /  /'
+	@echo ""
+	@echo "Options:"
+	@echo "  CONFIG  = path to .py config (default: sky130/configs/sram_8x8_sky130.py)"
+	@echo "  VERBOSE = 1 to enable verbose_level=1 (default: 0)"
+	@echo "  TOOL_BIN= path to Magic/KLayout/Netgen bin dir (default: /foss/tools/bin)"

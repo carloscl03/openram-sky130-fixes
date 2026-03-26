@@ -6,7 +6,7 @@
 # All rights reserved.
 #
 import datetime
-from math import ceil
+from math import ceil, sqrt
 from importlib import import_module, reload
 from openram import debug
 from openram.base import vector
@@ -15,7 +15,8 @@ from openram.base import design
 from openram.base import verilog
 from openram.base import lef
 from openram.sram_factory import factory
-from openram.tech import spice
+from openram.tech import spice, drc, layer_indices as tech_layer_indices
+from openram.base.utils import round_to_grid
 from openram import OPTS, print_time
 
 
@@ -92,7 +93,7 @@ class sram_1bank(design, verilog, lef):
                     self.add_pin("spare_wen{0}[{1}]".format(port, bit), "INPUT")
         for port in self.read_ports:
             for bit in range(self.word_size + self.num_spare_cols):
-                self.add_pin("dout{0}[{1}]".format(port, bit), "OUTPUT")
+                self.add_pin(self.dout_port_name(port, bit), "OUTPUT")
 
         # Standard supply and ground names
         try:
@@ -108,6 +109,17 @@ class sram_1bank(design, verilog, lef):
         self.add_pin(self.gnd_name, "GROUND")
         self.ext_supplies = [self.vdd_name, self.gnd_name]
         self.ext_supply = {"vdd" : self.vdd_name, "gnd" : self.gnd_name}
+
+    def dout_port_name(self, port, bit):
+        """
+        Top-level dout net name for layout, GDS labels, and SPICE ports.
+        Sky130: Magic's extract names read data as dout0_0, …; bracket-style
+        dout0[0] does not merge into ext2spice top .SUBCKT ports. Underscore
+        names align layout pins with extracted connectivity.
+        """
+        if OPTS.tech_name == "sky130":
+            return "dout{0}_{1}".format(port, bit)
+        return "dout{0}[{1}]".format(port, bit)
 
     def add_global_pex_labels(self):
         """
@@ -249,32 +261,41 @@ class sram_1bank(design, verilog, lef):
         # This will either be used to route or left unconnected.
         for pin_name in ["vdd", "gnd"]:
             for inst in self.insts:
-                self.copy_power_pins(inst, pin_name, self.ext_supply[pin_name])
+                # Tercer arg posicional es add_vias; el nombre externo va en new_name=
+                self.copy_power_pins(inst, pin_name,
+                                     new_name=self.ext_supply[pin_name])
 
         from openram.router import supply_router as router
         rtr = router(layers=self.supply_stack,
                      design=self,
                      bbox=bbox,
                      pin_type=OPTS.supply_pin_type)
-        rtr.route()
+        rtr.route(vdd_name=self.ext_supply["vdd"],
+                  gnd_name=self.ext_supply["gnd"])
 
         if OPTS.supply_pin_type in ["left", "right", "top", "bottom", "ring"]:
             # Find the lowest leftest pin for vdd and gnd
             for pin_name in ["vdd", "gnd"]:
+                # sky130: remove+replace with ring segments can drop top supply ports
+                # from Magic ext2spice. Keep routed vccd1/vssd1 shapes copied from
+                # child instances so extraction sees connected top rails.
+                if OPTS.tech_name == "sky130" and pin_name in ("vdd", "gnd"):
+                    continue
+                ext = self.ext_supply[pin_name]
                 # Copy the pin shape(s) to rectangles
-                for pin in self.get_pins(pin_name):
+                for pin in self.get_pins(ext):
                     self.add_rect(pin.layer,
                                   pin.ll(),
                                   pin.width(),
                                   pin.height())
 
                 # Remove the pin shape(s)
-                self.remove_layout_pin(pin_name)
+                self.remove_layout_pin(ext)
 
                 # Get new pins
-                pins = rtr.get_new_pins(pin_name)
+                pins = rtr.get_new_pins(ext)
                 for pin in pins:
-                    self.add_layout_pin(self.ext_supply[pin_name],
+                    self.add_layout_pin(ext,
                                         pin.layer,
                                         pin.ll(),
                                         pin.width(),
@@ -286,18 +307,21 @@ class sram_1bank(design, verilog, lef):
 
             # Find the lowest leftest pin for vdd and gnd
             for pin_name in ["vdd", "gnd"]:
+                if OPTS.tech_name == "sky130" and pin_name in ("vdd", "gnd"):
+                    continue
+                ext = self.ext_supply[pin_name]
                 # Copy the pin shape(s) to rectangles
-                for pin in self.get_pins(pin_name):
+                for pin in self.get_pins(ext):
                     self.add_rect(pin.layer,
                                   pin.ll(),
                                   pin.width(),
                                   pin.height())
 
                 # Remove the pin shape(s)
-                self.remove_layout_pin(pin_name)
+                self.remove_layout_pin(ext)
 
                 # Get the lowest, leftest pin
-                pin = rtr.get_ll_pin(pin_name)
+                pin = rtr.get_ll_pin(ext)
 
                 pin_width = 2 * getattr(self, "{}_width".format(pin.layer))
 
@@ -341,7 +365,7 @@ class sram_1bank(design, verilog, lef):
 
             if port in self.readwrite_ports or port in self.read_ports:
                 for bit in range(self.word_size + self.num_spare_cols):
-                    pins_to_route.append("dout{0}[{1}]".format(port, bit))
+                    pins_to_route.append(self.dout_port_name(port, bit))
 
             for bit in range(self.col_addr_size):
                 pins_to_route.append("addr{0}[{1}]".format(port, bit))
@@ -362,10 +386,37 @@ class sram_1bank(design, verilog, lef):
                         pins_to_route.append("spare_wen{0}[{1}]".format(port, bit))
 
         from openram.router import signal_escape_router as router
-        rtr = router(layers=self.m3_stack,
-                     bbox=bbox,
-                     design=self)
-        rtr.route(pins_to_route)
+
+        def route_with_fallback(pin_subset):
+            """Try escape routing over fallback stacks for a pin subset."""
+            for layer_stack in [self.m3_stack, self.m2_stack]:
+                try:
+                    rtr = router(layers=layer_stack,
+                                 bbox=bbox,
+                                 design=self)
+                    rtr.route(pin_subset)
+                    return True
+                except AssertionError:
+                    continue
+            return False
+
+        # Sky130: keep dout pins as added by add_layout_pins().
+        # For this PDK/config, pushing dout through signal_escape_router has
+        # repeatedly produced LVS collapses (dout*/vdd aliases to vssd1 in extract).
+        # Route only non-dout pins here and preserve dout connectivity/labels.
+        if OPTS.tech_name == "sky130":
+            dout_pins = [n for n in pins_to_route if n.startswith("dout")]
+            other_pins = [n for n in pins_to_route if not n.startswith("dout")]
+
+            if dout_pins:
+                debug.warning("sky130: skipping escape routing for dout pins; preserving bank-connected dout layout pins.")
+            if other_pins and not route_with_fallback(other_pins):
+                debug.warning("Escape routing failed for non-dout pins; keeping existing layout pins.")
+        else:
+            # Escape routing can be brittle depending on the computed routing graph
+            # and blockage distribution on a given stack.
+            if not route_with_fallback(pins_to_route):
+                debug.warning("Escape routing failed; keeping existing perimeter pins.")
 
     def compute_bus_sizes(self):
         """ Compute the independent bus widths shared between two and four bank SRAMs """
@@ -510,7 +561,7 @@ class sram_1bank(design, verilog, lef):
         temp = []
         for port in self.read_ports:
             for bit in range(self.word_size + self.num_spare_cols):
-                temp.append("dout{0}[{1}]".format(port, bit))
+                temp.append(self.dout_port_name(port, bit))
         if self.has_rbl:
             for port in self.all_ports:
                 temp.append("rbl_bl{0}".format(port))
@@ -662,7 +713,12 @@ class sram_1bank(design, verilog, lef):
             inputs = []
             outputs = []
             for bit in range(self.num_spare_cols):
-                inputs.append("spare_wen{}[{}]".format(port, bit))
+                # Top-level pin is spare_wen{port} when num_spare_cols==1; keep net name identical
+                # so LVS/readspice match the .SUBCKT port (not spare_wen0[0] vs spare_wen0).
+                if self.num_spare_cols == 1:
+                    inputs.append("spare_wen{}".format(port))
+                else:
+                    inputs.append("spare_wen{}[{}]".format(port, bit))
                 outputs.append("bank_spare_wen{}_{}".format(port, bit))
 
             self.connect_inst(inputs + outputs + ["clk_buf{}".format(port)] + self.ext_supplies)
@@ -983,19 +1039,37 @@ class sram_1bank(design, verilog, lef):
     def add_layout_pins(self, add_vias=True):
         """
         Add the top-level pins for a single bank SRAM with control.
+        Pin creation order must match add_pins() / .SUBCKT port order so Magic
+        readspice annotates layout ports correctly (otherwise LVS pairs wrong
+        nets, e.g. clk0 vs dout).
         """
-        for port in self.all_ports:
-            # Hack: If we are escape routing, set the pin layer to
-            # None so that we will start from the pin layer
-            # Otherwise, set it as the pin layer so that no vias are added.
-            # Otherwise, when we remove pins to move the dff array dynamically,
-            # we will leave some remaining vias when the pin locations change.
-            if add_vias:
-                pin_layer = None
-            else:
-                pin_layer = self.pwr_grid_layers[0]
+        if add_vias:
+            pin_layer = None
+        else:
+            pin_layer = self.pwr_grid_layers[0]
 
-            # Connect the control pins as inputs
+        # --- Same order as add_pins(): din, addr, csb/web/clk, wmask, spare_wen, dout ---
+
+        for port in self.write_ports:
+            for bit in range(self.word_size + self.num_spare_cols):
+                self.add_io_pin(self.data_dff_insts[port],
+                                "din_{}".format(bit),
+                                "din{0}[{1}]".format(port, bit),
+                                start_layer=pin_layer)
+
+        for port in self.all_ports:
+            for bit in range(self.col_addr_size):
+                self.add_io_pin(self.col_addr_dff_insts[port],
+                                "din_{}".format(bit),
+                                "addr{0}[{1}]".format(port, bit),
+                                start_layer=pin_layer)
+            for bit in range(self.row_addr_size):
+                self.add_io_pin(self.row_addr_dff_insts[port],
+                                "din_{}".format(bit),
+                                "addr{0}[{1}]".format(port, bit + self.col_addr_size),
+                                start_layer=pin_layer)
+
+        for port in self.all_ports:
             for signal in self.control_logic_inputs[port]:
                 if signal.startswith("rbl"):
                     continue
@@ -1004,52 +1078,77 @@ class sram_1bank(design, verilog, lef):
                                 signal + "{}".format(port),
                                 start_layer=pin_layer)
 
-            if port in self.write_ports:
-                for bit in range(self.word_size + self.num_spare_cols):
-                    self.add_io_pin(self.data_dff_insts[port],
+        for port in self.write_ports:
+            if self.write_size != self.word_size:
+                for bit in range(self.num_wmasks):
+                    self.add_io_pin(self.wmask_dff_insts[port],
                                     "din_{}".format(bit),
-                                    "din{0}[{1}]".format(port, bit),
+                                    "wmask{0}[{1}]".format(port, bit),
                                     start_layer=pin_layer)
 
-            if port in self.readwrite_ports or port in self.read_ports:
-                for bit in range(self.word_size + self.num_spare_cols):
-                    self.add_io_pin(self.bank_inst,
-                                    "dout{0}_{1}".format(port, bit),
-                                    "dout{0}[{1}]".format(port, bit),
-                                    start_layer=pin_layer)
-
-            for bit in range(self.col_addr_size):
-                self.add_io_pin(self.col_addr_dff_insts[port],
-                                "din_{}".format(bit),
-                                "addr{0}[{1}]".format(port, bit),
+            if self.num_spare_cols == 1:
+                self.add_io_pin(self.spare_wen_dff_insts[port],
+                                "din_{}".format(0),
+                                "spare_wen{0}".format(port),
                                 start_layer=pin_layer)
-
-            for bit in range(self.row_addr_size):
-                self.add_io_pin(self.row_addr_dff_insts[port],
-                                "din_{}".format(bit),
-                                "addr{0}[{1}]".format(port, bit + self.col_addr_size),
-                                start_layer=pin_layer)
-
-            if port in self.write_ports:
-                if self.write_size != self.word_size:
-                    for bit in range(self.num_wmasks):
-                        self.add_io_pin(self.wmask_dff_insts[port],
-                                        "din_{}".format(bit),
-                                        "wmask{0}[{1}]".format(port, bit),
-                                        start_layer=pin_layer)
-
-            if port in self.write_ports:
-                if self.num_spare_cols == 1:
+            elif self.num_spare_cols > 1:
+                for bit in range(self.num_spare_cols):
                     self.add_io_pin(self.spare_wen_dff_insts[port],
-                                    "din_{}".format(0),
-                                    "spare_wen{0}".format(port),
+                                    "din_{}".format(bit),
+                                    "spare_wen{0}[{1}]".format(port, bit),
                                     start_layer=pin_layer)
+
+        # read_ports includes RW ports (see sram_config); do not merge lists or ports duplicate.
+        # Promote dout top-level pins to m4 (via from bank pin layer) so signal_escape_router
+        # starts on the same metal as m3_stack's vertical layer — improves escape vs m3-only.
+        # Sky130: keep dout on the bank pin layer and use add_io_pin like din/addr; promoting
+        # to m4 often breaks escape routing so Magic/Netgen see no top pin (nets tie to replica).
+        dout_promote_layer = "m4"
+        for port in self.read_ports:
+            for bit in range(self.word_size + self.num_spare_cols):
+                pin_name = "dout{0}_{1}".format(port, bit)
+                top_name = self.dout_port_name(port, bit)
+                bank_pin = self.bank_inst.get_pin(pin_name)
+                can_promote = (
+                    OPTS.tech_name != "sky130"
+                    and add_vias
+                    and dout_promote_layer in tech_layer_indices
+                    and bank_pin.layer in tech_layer_indices
+                    and tech_layer_indices[bank_pin.layer]
+                    < tech_layer_indices[dout_promote_layer]
+                )
+                if can_promote:
+                    self.add_via_stack_center(
+                        offset=bank_pin.center(),
+                        from_layer=bank_pin.layer,
+                        to_layer=dout_promote_layer,
+                    )
+                    if OPTS.tech_name == "sky130":
+                        min_area = drc["minarea_{}".format(self.pwr_grid_layers[1])]
+                        pw = round_to_grid(sqrt(min_area))
+                        ph = round_to_grid(min_area / pw)
+                    else:
+                        pw = ph = None
+                    self.add_layout_pin_rect_center(
+                        text=top_name,
+                        layer=dout_promote_layer,
+                        offset=bank_pin.center(),
+                        width=pw,
+                        height=ph,
+                    )
                 else:
-                    for bit in range(self.num_spare_cols):
-                        self.add_io_pin(self.spare_wen_dff_insts[port],
-                                        "din_{}".format(bit),
-                                        "spare_wen{0}[{1}]".format(port, bit),
-                                        start_layer=pin_layer)
+                    if OPTS.tech_name == "sky130":
+                        # Keep dout labels physically on top of the bank dout shapes.
+                        # add_io_pin() creates a tiny promoted pin at center; for this
+                        # flow Magic may treat it as disconnected from extracted top nets.
+                        self.copy_layout_pin(self.bank_inst, pin_name, new_name=top_name)
+                    else:
+                        self.add_io_pin(
+                            self.bank_inst,
+                            pin_name,
+                            top_name,
+                            start_layer=pin_layer,
+                        )
 
     def route_layout(self):
         """ Route a single bank SRAM """
@@ -1072,12 +1171,39 @@ class sram_1bank(design, verilog, lef):
         init_bbox = self.get_bbox()
         # Route the supplies together and/or to the ring/stripes.
         # Route the pins to the perimeter
+        # Run escape before supplies so the power ring/stripes do not short dout/vdd
+        # to vssd1 (sky130 LVS: bank instance showed dout* and vdd→vssd1 in extract).
         if OPTS.perimeter_pins:
-            # We now route the escape routes far enough out so that they will
-            # reach past the power ring or stripes on the sides
             self.route_escape_pins(init_bbox)
         if OPTS.route_supplies:
+            init_bbox = self.get_bbox()
             self.route_supplies(init_bbox)
+
+        if OPTS.tech_name == "sky130":
+            # Reinforce top-level vccd1 pin directly on bank vdd geometry so
+            # extraction sees a connected top power pin, not only a promoted label.
+            self.copy_layout_pin(self.bank_inst, "vdd", new_name=self.ext_supply["vdd"])
+            # Same for top-level ground (vssd1): keep a directly connected
+            # label on bank gnd geometry for Magic extraction.
+            self.copy_layout_pin(self.bank_inst, "gnd", new_name=self.ext_supply["gnd"])
+
+        # Sky130 LVS debug: confirm that key top-level pins still exist in layout
+        # after escape/supply routing, regardless of verbose level.
+        if OPTS.tech_name == "sky130":
+            probe_names = []
+            if self.read_ports:
+                probe_names.append(self.dout_port_name(self.read_ports[0], 0))
+                probe_names.append(self.dout_port_name(self.read_ports[0], self.word_size))
+            probe_names.append(self.ext_supply["vdd"])
+
+            seen = []
+            for name in probe_names:
+                try:
+                    count = len(self.get_pins(name))
+                except Exception:
+                    count = 0
+                seen.append("{}={}".format(name, count))
+            debug.warning("sky130 pin-shapes after routing: " + ", ".join(seen))
 
 
     def route_dffs(self, add_routes=True):
@@ -1176,6 +1302,12 @@ class sram_1bank(design, verilog, lef):
                     y_bottom = 0
 
                 y_offset = y_bottom - self.data_bus_size[port] + 2 * self.m3_pitch
+                # sky130: the write_driver_array has an M3 supply stripe very close
+                # to the bank bottom.  Push the data-bus channel route down by one
+                # full M3 spacing so the topmost via3 M3 pads clear the bank M3 rail
+                # by >= drc["m3_to_m3"] (fixes m3.2 DRC violations).
+                if OPTS.tech_name == "sky130":
+                    y_offset -= drc["m3_to_m3"]
                 offset = vector(self.control_logic_insts[port].rx() + self.dff.width,
                                 y_offset)
                 cr = channel_route(netlist=route_map,

@@ -132,6 +132,9 @@ def print_banner():
     dev_info = "Development help: openram-dev-group@ucsc.edu"
     debug.print_raw("|=========" + dev_info.center(60) + "=========|")
     debug.print_raw("|=========" + "See LICENSE for license info".center(60) + "=========|")
+    debug.print_raw("|=========" + " ".center(60) + "=========|")
+    debug.print_raw("|=========" + "sky130 DRC/LVS fixes: euler".center(60) + "=========|")
+    debug.print_raw("|=========" + "github.com/carloscl03".center(60) + "=========|")
     debug.print_raw("|==============================================================================|")
 
 
@@ -211,6 +214,10 @@ def install_conda():
 
     # Don't setup conda if not used
     if not OPTS.use_conda or OPTS.is_unit_test:
+        return
+
+    if os.environ.get("OPENRAM_SKIP_CONDA", "").lower() in ("1", "true", "yes"):
+        debug.info(1, "Skipping conda setup (OPENRAM_SKIP_CONDA is set).")
         return
 
     debug.info(1, "Creating conda setup...");
@@ -421,7 +428,11 @@ def setup_paths():
     # Use a unique temp subdirectory if multithreaded
     if OPTS.num_threads > 1 or OPTS.openram_temp == "/tmp":
         # Make a unique subdir
-        tempdir = "/openram_{0}_{1}_temp".format(getpass.getuser(),
+        try:
+            _user = getpass.getuser()
+        except KeyError:
+            _user = "uid{}".format(os.getuid())
+        tempdir = "/openram_{0}_{1}_temp".format(_user,
                                                  os.getpid())
         # Only add the unique subdir one time
         if tempdir not in OPTS.openram_temp:

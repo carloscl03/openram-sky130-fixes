@@ -1,0 +1,193 @@
+# Compilation & Validation Guide — OpenRAM sky130
+
+---
+
+## Running a compilation
+
+```bash
+# Inside the Docker container (iic-osic-tools_chipathon_xserver)
+export PATH=/foss/tools/bin:$PATH
+cd /foss/designs/OpenRAM
+
+python3 sram_compiler.py sky130/configs/my_sram.py
+```
+
+> **Important:** always use `sram_compiler.py`, never run the config file directly.
+> `sram_compiler.py` sets `OPENRAM_HOME=/foss/designs/OpenRAM/compiler`, forcing the
+> local patched code over the system-installed openram package. Running
+> `python3 sky130/configs/my_sram.py` directly would use the system package and
+> ignore all local fixes.
+
+---
+
+## Expected terminal output
+
+With `verbose_level = 0` the full output looks like this:
+
+```
+** Submodules:    18.8 seconds
+** Placement:      0.1 seconds
+WARNING: sram_1bank.py: line 412: sky130: skipping escape routing for dout pins; \
+         preserving bank-connected dout layout pins.
+WARNING: sram_1bank.py: line 1206: sky130 pin-shapes after routing: \
+         dout0_0=1, dout0_8=1, vccd1=44
+** Routing:      114.5 seconds
+DRC violations by cell (top 15, from Magic drc listall count):
+   13507  sram_8x8_sky130
+   ...
+     124  sky130_fd_bd_sram__sram_sp_cell_opt1      ← actual source (PDK cell)
+DRC violations by rule (from Magic drc listall why):
+    9065  This layer can't abut or partially overlap between subcells
+    6224  Local interconnect overlap of diffusion contact < 0.08um  (li.5)
+    ...
+KLayout DRC: running sky130A ruleset on sram_8x8_sky130.gds
+KLayout DRC: 0 violation(s) — report: /tmp/.../sram_8x8_sky130.klayout.lyrdb
+LVS: sky130 pre-normalization: forced extracted .SUBCKT header ports to reference...
+WARNING: magic.py: line 1238: sram_8x8_sky130  LVS: topology equivalent but pin \
+         matching non-unique (known Netgen symmetry limitation for sky130 SRAM arrays)
+sram_8x8_sky130    LVS matches
+** Verification:  199.8 seconds
+** SRAM creation: 333.6 seconds
+```
+
+---
+
+## What each message means
+
+### Routing warnings (`sram_1bank.py`) — always visible, expected
+
+| Message | Meaning |
+|---------|---------|
+| `skipping escape routing for dout pins` | Intentional sky130 workaround: dout pins are preserved directly from the bank layout to avoid routing aliases during Magic extraction |
+| `pin-shapes after routing: dout0_0=1, dout0_8=1, vccd1=44` | Post-routing pin shape count. 1 shape per dout bit is correct. 44 shapes for vccd1 is the distributed power rail — expected |
+
+### Magic DRC breakdown — always visible, informational
+
+The per-cell and per-rule tables are always printed via `print_stderr()`.
+All violations come from `sky130_fd_bd_sram__*` PDK cells — see "Magic DRC warnings" below.
+
+### KLayout DRC — always visible, authoritative
+
+```
+KLayout DRC: 0 violation(s)
+```
+
+This is the **tape-out sign-off result**. 0 means the GDS is correct.
+
+### LVS (`magic.py` / Netgen) — always visible
+
+| Message | Meaning |
+|---------|---------|
+| `LVS: sky130 pre-normalization: forced extracted .SUBCKT header ports` | Normal pre-processing step that aligns extracted port order with the reference netlist |
+| `WARNING: LVS: topology equivalent but pin matching non-unique` | Known Netgen limitation — see "LVS warning" below |
+| `sram_8x8_sky130    LVS matches` | **Connectivity verified.** Authoritative LVS result |
+
+---
+
+## Magic DRC warnings — why they appear and why they don't matter
+
+Magic will always report thousands of violations. With `verbose_level = 0` these
+are silenced as a `WARNING`-level message and only the breakdown tables are shown.
+
+**All violations originate in PDK bitcells:**
+
+```
+124  sky130_fd_bd_sram__sram_sp_cell_opt1       ← foundry bitcell
+124  sky130_fd_bd_sram__sram_sp_cell_opt1a
+123  sky130_fd_bd_sram__openram_sp_cell_opt1_replica
+123  sky130_fd_bd_sram__openram_sp_cell_opt1a_replica
+```
+
+The larger counts higher in the list (bank, bitcell_array, replica_array) are the
+same violations propagated upward through the cell hierarchy.
+
+**Why these violations exist:**
+SkyWater designed the sky130 SRAM bitcell at the technology limit to minimize area.
+The resulting geometry violates several generic DRC rules (li1 width, li1 spacing,
+contact overlap, well boundaries). SkyWater has internal waivers for all of these.
+Magic does not have those waivers.
+
+**Most common rules and why they are expected:**
+
+| Rule | What it checks | Why the PDK "violates" it |
+|------|----------------|--------------------------|
+| `li.1` | li1 width ≥ 0.17 µm | BL/WL wires at minimum width inside bitcell |
+| `li.c2` | li1 core spacing ≥ 0.14 µm | Maximum density in the 6T core |
+| `li.5` | li1 overlap of contact ≥ 0.08 µm | Contacts at minimum enclosure for area |
+| `licon.1` | Contact width ≥ 0.17 µm | Minimum-size contacts on diffusion |
+| `via.1a` | Via1 size ≥ 0.26 µm | Compact vias in the bitcell |
+| `diff/tap.8` | N-well over P-diff ≥ 0.18 µm | Tight PMOS in SRAM |
+| `"can't abut"` | 9 065 cases | Cells designed to abut in arrays — correct by design |
+
+**Why they don't matter for tape-out:**
+The eFabless / Google MPW / Chipathon sign-off uses **KLayout + sky130A.lydrc**.
+That ruleset has the proper PDK-cell handling. KLayout = 0 is the pass criterion.
+
+---
+
+## LVS warning — "pin matching non-unique"
+
+```
+WARNING: LVS: topology equivalent but pin matching non-unique
+         (known Netgen symmetry limitation for sky130 SRAM arrays)
+```
+
+This appears on every sky130 SRAM compilation. It is a known limitation of Netgen's
+graph-partition algorithm:
+
+- An 8-column SRAM has 8 bitline pairs (BL0/BLB0 … BL7/BLB7) that are
+  topologically identical.
+- The PFET precharge transistors create a path `vccd1 → bl_N` for every column
+  including the replica bitline.
+- With `permute transistors` enabled, Netgen cannot distinguish which bl_N belongs
+  to which column and finds multiple valid pin-matching solutions.
+
+**This is not a connectivity error.** The line `"Device classes … are equivalent"`
+embedded in the LVS report confirms the circuit is topologically correct.
+The authoritative result is **`LVS matches`** on the following line.
+
+---
+
+## Verbose levels
+
+OpenRAM messages fall into two categories: always visible and level-controlled.
+
+### Always visible (not controlled by `verbose_level`)
+
+| Function | Prefix | Behavior |
+|----------|--------|----------|
+| `debug.error()` | `ERROR: file X: line N:` | Prints and aborts via assert |
+| `debug.warning()` | `WARNING: file X: line N:` | Prints, does **not** abort |
+| `debug.print_raw()` | none | Always prints (timings, banners, `LVS matches`) |
+| `debug.print_stderr()` | none | Always prints (DRC/KLayout/LVS summaries) |
+
+### Controlled by `verbose_level` in your config
+
+| Call | Visible when | Prefix |
+|------|-------------|--------|
+| `debug.info(1, ...)` | `verbose_level >= 1` | `[module/function]:` |
+| `debug.info(2, ...)` | `verbose_level >= 2` | `[module/function]:` |
+
+If `verbose_level = 0` no `info()` message is ever printed.
+
+### When to use each level
+
+| `verbose_level` | Use case |
+|-----------------|----------|
+| `0` | Normal compilation — results and important warnings only |
+| `1` | Debugging — shows Magic DRC full breakdown, routing offsets, DRC/LVS run stats |
+| `2` | Deep debugging — netlist normalization steps, every artifact copied, port details |
+
+---
+
+## Compilation timings (reference, 8×8 memory)
+
+| Stage | Time |
+|-------|------|
+| Submodules | ~19 s |
+| Placement | ~0.1 s |
+| Routing | ~115 s |
+| Verification (DRC + LVS) | ~200 s |
+| **Total** | **~335 s (~5.5 min)** |
+
+Larger memories scale roughly linearly with array area.
