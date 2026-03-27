@@ -45,9 +45,9 @@ class rom():
 
         self.name = name
 
-        import openram.modules.rom_bank as rom
+        from openram.modules.rom_bank import rom_bank
 
-        self.r = rom(name, rom_config)
+        self.r = rom_bank(name, rom_config)
 
         self.r.create_netlist()
         if not OPTS.netlist_only:

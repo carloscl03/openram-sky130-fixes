@@ -1,12 +1,17 @@
 # Compilation & Validation Guide — OpenRAM sky130
 
+This guide covers both the **SRAM compiler** and the **ROM compiler**.
+For config file options see [../configs/README.md](../configs/README.md).
+
 ---
 
 ## Running a compilation
 
+### SRAM
+
 ```bash
 # Generic (any machine, any clone location)
-cd /path/to/OpenRAM        # wherever you cloned the repo
+cd /path/to/OpenRAM
 python3 sram_compiler.py sky130/configs/my_sram.py
 
 # Docker (iic-osic-tools_chipathon_xserver)
@@ -15,11 +20,22 @@ cd /foss/designs/OpenRAM
 python3 sram_compiler.py sky130/configs/my_sram.py
 ```
 
-> **Important:** always use `sram_compiler.py`, never run the config file directly.
-> `sram_compiler.py` sets `OPENRAM_HOME=<repo>/compiler`, forcing the local patched
-> code over any system-installed `openram` package. Running
-> `python3 sky130/configs/my_sram.py` directly would use the system package and
-> ignore all local fixes.
+### ROM
+
+```bash
+cd /path/to/OpenRAM
+python3 rom_compiler.py sky130/configs/my_rom.py
+
+# Docker:
+export PATH=/foss/tools/bin:$PATH
+cd /foss/designs/OpenRAM
+python3 rom_compiler.py sky130/configs/my_rom.py
+```
+
+> **Important:** always use the compiler script (`sram_compiler.py` /
+> `rom_compiler.py`), never run the config file directly.
+> The compiler sets `OPENRAM_HOME=<repo>/compiler`, forcing the local patched
+> code over any system-installed `openram` package.
 
 ---
 
@@ -289,3 +305,25 @@ If either command returns no output, apply the patches from `sky130/patches/`
 Fixed by the Docker `getpwuid` patch. If you still see it, you are running the
 upstream package. Use `sram_compiler.py` from the repo root so the local
 `compiler/globals.py` is loaded.
+
+### ROM: `ERROR: Custom cell pin names do not match spice file`
+
+`rom_compiler.py` is loading the system-installed `openram` package instead of the
+local patched code. Make sure you run from the repo root:
+```bash
+cd /path/to/OpenRAM
+python3 rom_compiler.py sky130/configs/my_rom.py
+```
+This triggers the OPENRAM_HOME bootstrap in `rom_compiler.py` that forces the local
+`compiler/` directory.
+
+### ROM: `TypeError: 'module' object is not callable`
+
+This indicates an older version of `compiler/rom.py` with a broken import.
+Check the import on line ~48:
+```bash
+grep "rom_bank" compiler/rom.py
+```
+It should read `from openram.modules.rom_bank import rom_bank`.
+If it reads `import openram.modules.rom_bank as rom`, apply the patch from
+`sky130/patches/` (see [../patches/README.md](../patches/README.md)).

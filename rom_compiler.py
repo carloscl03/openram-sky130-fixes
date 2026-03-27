@@ -20,6 +20,17 @@ import sys
 import os
 import datetime
 
+# Force local repo compiler over any system-installed openram package.
+# Same pattern as sram_compiler.py — must run BEFORE any openram import.
+_rom_root = os.path.dirname(os.path.abspath(__file__))
+if os.path.isfile(os.path.join(_rom_root, "__init__.py")) and os.path.isdir(
+        os.path.join(_rom_root, "compiler")):
+    sys.path.insert(0, _rom_root)
+    os.environ.setdefault("OPENRAM_HOME", os.path.join(_rom_root, "compiler"))
+    _sky = os.path.join(_rom_root, "technology", "sky130")
+    if os.path.isdir(_sky):
+        os.environ.setdefault("OPENRAM_TECH", os.path.abspath(_sky) + os.sep)
+
 # You don't need the next two lines if you're sure that openram package is installed
 from common import *
 make_openram_package()

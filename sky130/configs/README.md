@@ -1,9 +1,17 @@
-# SRAM Configuration Guide — sky130
+# Configuration Guide — OpenRAM sky130
+
+This repo supports two compilers: **SRAM** (read/write) and **ROM** (read-only,
+data programmed at compile time). Each has its own config file format and entry point.
+
+| Memory type | Compiler | Reference config |
+|-------------|----------|-----------------|
+| SRAM | `sram_compiler.py` | [sram_8x8_sky130.py](sram_8x8_sky130.py) |
+| ROM | `rom_compiler.py` | [test_rom_sky130.py](test_rom_sky130.py) |
 
 A configuration file is a plain Python script that sets variables consumed by OpenRAM.
 
-> **Always run from the repo root** using `sram_compiler.py` — never run the config
-> file directly with `python3`. `sram_compiler.py` sets `OPENRAM_HOME` to the local
+> **Always run from the repo root** using the compiler script — never run the config
+> file directly with `python3`. The compiler sets `OPENRAM_HOME` to the local
 > `compiler/` directory, which loads the patched code instead of any system-installed
 > `openram` package.
 
@@ -298,3 +306,114 @@ Confirm the fixes are active:
 grep "top_inst.by()" compiler/modules/bank.py
 # should print the clamp line — if empty, the patch was not applied
 ```
+
+---
+
+# ROM Configuration Guide — sky130
+
+## Running a ROM compilation
+
+```bash
+cd /path/to/OpenRAM
+python3 rom_compiler.py sky130/configs/my_rom.py
+
+# Docker:
+export PATH=/foss/tools/bin:$PATH
+cd /foss/designs/OpenRAM
+python3 rom_compiler.py sky130/configs/my_rom.py
+```
+
+## Minimal template
+
+```python
+import os, sys
+
+# ── ROM DATA ──────────────────────────────────────────────────────────────────
+word_size  = 1                          # bytes per word (not bits)
+data_type  = "hex"                      # "hex" or "bin"
+rom_data   = "sky130/configs/my_rom.hex"  # path relative to repo root
+
+output_name = "rom_64x8_sky130"
+output_path = "temp/"
+
+# ── TECHNOLOGY ────────────────────────────────────────────────────────────────
+tech_name           = "sky130"
+nominal_corner_only = True
+route_supplies      = "ring"
+
+_openram_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_tech_path = os.path.join(_openram_root, "technology")
+if _tech_path not in sys.path:
+    sys.path.insert(0, _tech_path)
+
+# ── VALIDATION ────────────────────────────────────────────────────────────────
+check_lvsdrc  = True
+inline_lvsdrc = False
+
+# ── COMPILATION FLAGS ─────────────────────────────────────────────────────────
+netlist_only  = False
+verbose_level = 0
+
+# ── DOCKER / ENVIRONMENT WORKAROUNDS ──────────────────────────────────────────
+os.environ.setdefault("OPENRAM_MAGIC_NO_USER_RC", "1")
+os.environ.setdefault("OPENRAM_SKIP_CONDA", "1")
+use_conda = False
+```
+
+## Key options explained
+
+| Option | Values | Effect |
+|--------|--------|--------|
+| `word_size` | integer | **Bytes** per word (not bits — ROM uses bytes). A 1-byte word = 8 bits per column group. |
+| `data_type` | `"hex"` / `"bin"` | Format of the data file. `"hex"` is a plain hex string (e.g. `deadbeef…`). `"bin"` is a raw binary file. |
+| `rom_data` | file path | Path to the data file, **relative to the repo root** (where you run `rom_compiler.py`). |
+| `words_per_row` | integer / omit | How many words share a wordline. If omitted, auto-computed to make the array roughly square. |
+| `route_supplies` | `"ring"` | Power distribution style. `"ring"` surrounds the block with a power ring. |
+| `check_lvsdrc` | `True` / `False` | Run Magic DRC + KLayout DRC + Netgen LVS after layout. |
+
+## Array sizing
+
+The ROM has no `num_words` parameter — it is derived from the data file:
+
+```
+num_words = file_size_in_bytes / word_size
+```
+
+Array dimensions are then auto-computed:
+
+```
+words_per_row ≈ ceil(sqrt(num_words) / (2 × word_size))
+rows          = num_words / words_per_row
+cols          = words_per_row × word_size × 8
+```
+
+**Minimum data file size:** there is no hard row minimum like the SRAM's 16-row
+constraint. In practice, use at least 64 bytes (`word_size=1`) to get a reasonable
+array shape (16 rows × 4 words/row × 8 cols = 32 cols).
+
+## Preparing a data file
+
+```bash
+# 64 bytes, values 0x00–0x3F (hex format)
+python3 -c "open('my_rom.hex','w').write(bytes(range(64)).hex())"
+
+# 256 bytes of zeros (binary format)
+python3 -c "open('my_rom.bin','wb').write(bytes(256))"
+
+# From a compiled firmware binary (binary format)
+cp firmware.bin sky130/configs/my_rom.bin
+# → set data_type = "bin" and word_size to match your bus width
+```
+
+## ROM vs SRAM differences
+
+| | SRAM | ROM |
+|--|------|-----|
+| Compiler | `sram_compiler.py` | `rom_compiler.py` |
+| `word_size` unit | bits | **bytes** |
+| `num_words` | set explicitly | auto from file size |
+| Data | written at runtime | fixed at compile time |
+| Output files | sp, v, lef, gds, lib, lvs, sym | sp, v, lef, gds |
+| Timing model | ✓ `.lib` | ✗ (TODO) |
+| xschem symbol | ✓ `generate_sym = True` | ✗ |
+| Power distribution | internal stripes | `route_supplies = "ring"` |

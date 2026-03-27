@@ -32,7 +32,7 @@ Scales to larger memories — fixes are geometry-driven, not hardcoded.
 
 ---
 
-## Quickstart
+## Quickstart — SRAM
 
 ```bash
 # 1. Go to the repo root (wherever you cloned it)
@@ -66,10 +66,32 @@ make -f sky130/Makefile.sky130 compile CONFIG=sky130/configs/my_sram.py
 
 ---
 
+## Quickstart — ROM
+
+```bash
+# 1. Prepare a data file (hex or binary)
+python3 -c "open('my_rom.hex','w').write(bytes(range(64)).hex())"
+
+# 2. Copy and customise the reference config
+cp sky130/configs/test_rom_sky130.py sky130/configs/my_rom.py
+# → set rom_data, word_size, output_name
+
+# 3. Compile
+python3 rom_compiler.py sky130/configs/my_rom.py
+```
+
+> **Important:** always use `rom_compiler.py`, never run the config file directly.
+> Same reason as for the SRAM — it sets `OPENRAM_HOME` to the local compiler.
+
+See [configs/README.md](configs/README.md) for ROM config options and sizing rules.
+
+---
+
 ## Output files
 
-After a successful compilation, all outputs land in `temp/` (created automatically,
-**gitignored** — it will not appear in `git status`):
+All outputs land in `temp/` (created automatically, **gitignored**).
+
+### SRAM
 
 | File | Contents |
 |------|----------|
@@ -80,6 +102,15 @@ After a successful compilation, all outputs land in `temp/` (created automatical
 | `temp/<name>.v` | Verilog behavioral model |
 | `temp/<name>.sym` | xschem symbol — set `generate_sym = True` in config |
 | `temp/<name>.klayout.lyrdb` | KLayout DRC report (XML) |
+
+### ROM
+
+| File | Contents |
+|------|----------|
+| `temp/<name>.gds` | Layout (GDS-II) |
+| `temp/<name>.sp` | SPICE netlist |
+| `temp/<name>.lef` | Abstract LEF for place-and-route |
+| `temp/<name>.v` | Verilog behavioral model |
 
 The `<name>` matches `output_name` in your config file.
 

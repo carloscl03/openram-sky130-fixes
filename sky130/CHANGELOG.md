@@ -9,6 +9,22 @@ where applicable so they do not affect other PDK targets.
 
 ### Fixed
 
+#### `rom_compiler.py` — OPENRAM_HOME not set
+- **ROM compiler used system-installed package instead of local patched code** —
+  `rom_compiler.py` was missing the `OPENRAM_HOME` bootstrap block that
+  `sram_compiler.py` already had. Running without it caused the system-installed
+  `openram` package to be loaded, which does not have the sky130 patches and
+  fails with `ERROR: Custom cell pin names do not match spice file`.
+  Added the same `sys.path.insert / os.environ.setdefault("OPENRAM_HOME", ...)` block
+  so the local `compiler/` directory is always used.
+
+#### `compiler/rom.py` — wrong `rom_bank` import
+- **`TypeError: 'module' object is not callable`** — `compiler/rom.py` imported the
+  `rom_bank` module with alias `rom` and then called `rom(name, rom_config)`, treating
+  the module itself as a callable. Fixed by importing the class directly:
+  `from openram.modules.rom_bank import rom_bank` and constructing with
+  `self.r = rom_bank(name, rom_config)`.
+
 #### `compiler/modules/sram_1bank.py` — `signal_escape_routing()`
 - **dout pins not escaped to block boundary** — sky130 had an explicit bypass
   that skipped escape routing for all `dout*` pins, leaving them at their
@@ -29,6 +45,12 @@ where applicable so they do not affect other PDK targets.
   notation) are collapsed into single xschem bus pins. Singleton control and
   power pins remain individual. The SPICE format string in `K{}` lists all
   subcircuit ports explicitly in order for correct instantiation.
+
+#### `sky130/configs/test_rom_sky130.py` + `sky130/configs/test_rom.hex`
+- **Minimal ROM reference config** — `test_rom_sky130.py` provides a minimal working
+  ROM configuration (`word_size=1`, 64 bytes, hex data file) that exercises the full
+  `rom_compiler.py` flow: netlist, layout, LEF, Verilog. Uses relative `_tech_path`
+  so it works from any clone location.
 
 #### `sram_compiler.py` — `generate_sym` hook
 - **Automatic symbol generation** — when the config file sets `generate_sym = True`,
