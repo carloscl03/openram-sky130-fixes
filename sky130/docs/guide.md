@@ -39,6 +39,52 @@ python3 rom_compiler.py sky130/configs/my_rom.py
 
 ---
 
+## Using the Makefile
+
+`sky130/Makefile.sky130` wraps both compilers with automatic path detection.
+Always invoke it with `-f` from the **repo root**:
+
+```bash
+# Check that tools and PDK are reachable before compiling
+make -f sky130/Makefile.sky130 check-env
+
+# Compile SRAM (default config: sram_8x8_sky130.py)
+make -f sky130/Makefile.sky130 compile
+
+# Compile with a custom config
+make -f sky130/Makefile.sky130 compile CONFIG=sky130/configs/my_sram.py
+
+# Compile ROM
+make -f sky130/Makefile.sky130 compile-rom ROM_CONFIG=sky130/configs/my_rom.py
+
+# Re-run KLayout DRC on an already-generated GDS (fast, no recompile)
+make -f sky130/Makefile.sky130 drc-only
+
+# Remove generated files for the active config
+make -f sky130/Makefile.sky130 clean
+
+# Remove the entire temp/ directory
+make -f sky130/Makefile.sky130 veryclean
+```
+
+### What the Makefile resolves automatically
+
+| Variable | How it is found |
+|----------|-----------------|
+| `OPENRAM_ROOT` | Parent directory of the Makefile itself — never depends on `pwd` or `git` |
+| `OPENRAM_HOME` | `$(OPENRAM_ROOT)/compiler` — exported to force local code over system package |
+| `OPENRAM_TECH` | `$(OPENRAM_ROOT)/technology/sky130/` — exported for technology lookup |
+| `TOOL_BIN` | Searches `/foss/tools/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin` for `klayout` |
+| `PDK_ROOT` | Searches bundled `ciel/`, then `~/.volare`, then `/foss/pdk` for `sky130A` |
+
+Override any variable on the command line:
+
+```bash
+make -f sky130/Makefile.sky130 TOOL_BIN=/usr/local/bin PDK_ROOT=/path/to/pdks compile
+```
+
+---
+
 ## Expected terminal output
 
 With `verbose_level = 0` the output looks like this

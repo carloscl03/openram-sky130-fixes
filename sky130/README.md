@@ -54,15 +54,18 @@ cd /foss/designs/OpenRAM
 python3 sram_compiler.py sky130/configs/my_sram.py
 ```
 
-Or with `make`:
+Or with `make` (handles PATH and PDK_ROOT automatically):
 
 ```bash
+make -f sky130/Makefile.sky130 compile
 make -f sky130/Makefile.sky130 compile CONFIG=sky130/configs/my_sram.py
 ```
 
-> **Important:** always use `sram_compiler.py`, never run the config file directly.
-> It sets `OPENRAM_HOME` to the local `compiler/` directory so the patched code
-> is used instead of any system-installed `openram` package.
+> **Important:** always use `sram_compiler.py` or the Makefile, never run the config
+> file directly. The compiler sets `OPENRAM_HOME` to the local `compiler/` directory
+> so the patched code is used instead of any system-installed `openram` package.
+> The Makefile also exports `OPENRAM_HOME`, `OPENRAM_TECH`, and auto-detects
+> `TOOL_BIN` and `PDK_ROOT`.
 
 ---
 
@@ -78,10 +81,14 @@ cp sky130/configs/test_rom_sky130.py sky130/configs/my_rom.py
 
 # 3. Compile
 python3 rom_compiler.py sky130/configs/my_rom.py
+
+# Or with make:
+make -f sky130/Makefile.sky130 compile-rom ROM_CONFIG=sky130/configs/my_rom.py
 ```
 
-> **Important:** always use `rom_compiler.py`, never run the config file directly.
-> Same reason as for the SRAM — it sets `OPENRAM_HOME` to the local compiler.
+> **Important:** always use `rom_compiler.py` or the Makefile, never run the config
+> file directly. Same reason as for the SRAM — it sets `OPENRAM_HOME` to the local
+> compiler.
 
 See [configs/README.md](configs/README.md) for ROM config options and sizing rules.
 
@@ -123,6 +130,7 @@ The `<name>` matches `output_name` in your config file.
 | [configs/README.md](configs/README.md) | Config file template and all options explained |
 | [docs/guide.md](docs/guide.md) | Full compilation guide: expected output, verbose levels, warning explanations |
 | [docs/drc_fixes.md](docs/drc_fixes.md) | Technical root-cause analysis for each fix |
+| [docs/architecture.md](docs/architecture.md) | Compiler internals: how OpenRAM works, what each file does, compilation pipeline |
 | [patches/README.md](patches/README.md) | How to apply patches to a fresh upstream OpenRAM |
 | [CHANGELOG.md](CHANGELOG.md) | History of all fixes and additions |
 
