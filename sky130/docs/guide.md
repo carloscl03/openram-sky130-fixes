@@ -25,24 +25,41 @@ python3 sram_compiler.py sky130/configs/my_sram.py
 
 ## Expected terminal output
 
-With `verbose_level = 0` the full output looks like this:
+With `verbose_level = 0` the output looks like this
+(example for `output_name = "sram_8x8_sky130"`):
 
 ```
-** Submodules:    18.8 seconds
-** Placement:      0.1 seconds
-WARNING: sram_1bank.py: line 412: sky130: skipping escape routing for dout pins; \
-         preserving bank-connected dout layout pins.
-WARNING: sram_1bank.py: line 1206: sky130 pin-shapes after routing: \
+Words per row: 1
+Output files are:
+/path/to/OpenRAM/temp/sram_8x8_sky130.lvs
+/path/to/OpenRAM/temp/sram_8x8_sky130.sp
+/path/to/OpenRAM/temp/sram_8x8_sky130.v
+/path/to/OpenRAM/temp/sram_8x8_sky130.lib
+/path/to/OpenRAM/temp/sram_8x8_sky130.py
+/path/to/OpenRAM/temp/sram_8x8_sky130.html
+/path/to/OpenRAM/temp/sram_8x8_sky130.log
+/path/to/OpenRAM/temp/sram_8x8_sky130.lef
+/path/to/OpenRAM/temp/sram_8x8_sky130.gds
+/path/to/OpenRAM/temp/sram_8x8_sky130.sym   ← only if generate_sym = True
+** Submodules:    19.8 seconds
+** Placement:      0.2 seconds
+WARNING: file sram_1bank.py: line 1206: sky130 pin-shapes after routing: \
          dout0_0=1, dout0_8=1, vccd1=44
-** Routing:      114.5 seconds
+** Routing:      107.8 seconds
 DRC violations by cell (top 15, from Magic drc listall count):
    13507  sram_8x8_sky130
-   ...
+   13358  sram_8x8_sky130_sky130_capped_replica_bitcell_array
+   ...   (15 cells total — all violations from PDK bitcells propagated up)
      124  sky130_fd_bd_sram__sram_sp_cell_opt1      ← actual source (PDK cell)
+     124  sky130_fd_bd_sram__sram_sp_cell_opt1a
+     123  sky130_fd_bd_sram__openram_sp_cell_opt1a_replica
+     123  sky130_fd_bd_sram__openram_sp_cell_opt1_replica
 DRC violations by rule (from Magic drc listall why):
     9065  This layer can't abut or partially overlap between subcells
-    6224  Local interconnect overlap of diffusion contact < 0.08um  (li.5)
-    ...
+    6224  Local interconnect overlap of diffusion contact < 0.08um (li.5)
+    4520  Core local interconnect spacing < 0.14um (li.c2)
+    3770  Local interconnect width < 0.17um (li.1)
+    ...   (all rules printed — ~40 lines total — see "Magic DRC warnings" below)
 KLayout DRC: running sky130A ruleset on sram_8x8_sky130.gds
 KLayout DRC: 0 violation(s) — report: /tmp/.../sram_8x8_sky130.klayout.lyrdb
 LVS: sky130 pre-normalization: forced extracted .SUBCKT header ports to reference...
@@ -50,19 +67,31 @@ WARNING: magic.py: line 1238: sram_8x8_sky130  LVS: topology equivalent but pin 
          matching non-unique (known Netgen symmetry limitation for sky130 SRAM arrays)
 sram_8x8_sky130    LVS matches
 ** Verification:  199.8 seconds
+Generating xschem symbol: temp/sram_8x8_sky130.sym   ← only if generate_sym = True
+Symbol written: temp/sram_8x8_sky130.sym
+  3 bus pin(s), 6 singleton(s) — 28 SPICE ports total
 ** SRAM creation: 333.6 seconds
 ```
+
+> **Note on output volume:** `verbose_level = 0` suppresses `debug.info()` messages
+> (routing offsets, per-cell stats, etc.) but the DRC tables are printed via
+> `debug.print_stderr()` which is always visible regardless of verbosity.
+> The full rule list (~40 lines for an 8×8) is expected — see "Magic DRC warnings" below
+> for why these violations don't matter for tape-out.
+
+> Timings are approximate for an 8×8 array. Larger arrays scale roughly linearly.
+> The "Output files are:" block always appears first — if it does not, the config
+> file was run directly instead of via `sram_compiler.py`.
 
 ---
 
 ## What each message means
 
-### Routing warnings (`sram_1bank.py`) — always visible, expected
+### Routing warning (`sram_1bank.py`) — always visible, expected
 
 | Message | Meaning |
 |---------|---------|
-| `skipping escape routing for dout pins` | Intentional sky130 workaround: dout pins are preserved directly from the bank layout to avoid routing aliases during Magic extraction |
-| `pin-shapes after routing: dout0_0=1, dout0_8=1, vccd1=44` | Post-routing pin shape count. 1 shape per dout bit is correct. 44 shapes for vccd1 is the distributed power rail — expected |
+| `pin-shapes after routing: dout0_0=1, dout0_8=1, vccd1=44` | Post-routing pin shape count. 1 shape per dout bit is correct. `vccd1` count reflects the distributed power rail — expected |
 
 ### Magic DRC breakdown — always visible, informational
 

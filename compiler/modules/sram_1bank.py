@@ -400,23 +400,10 @@ class sram_1bank(design, verilog, lef):
                     continue
             return False
 
-        # Sky130: keep dout pins as added by add_layout_pins().
-        # For this PDK/config, pushing dout through signal_escape_router has
-        # repeatedly produced LVS collapses (dout*/vdd aliases to vssd1 in extract).
-        # Route only non-dout pins here and preserve dout connectivity/labels.
-        if OPTS.tech_name == "sky130":
-            dout_pins = [n for n in pins_to_route if n.startswith("dout")]
-            other_pins = [n for n in pins_to_route if not n.startswith("dout")]
-
-            if dout_pins:
-                debug.warning("sky130: skipping escape routing for dout pins; preserving bank-connected dout layout pins.")
-            if other_pins and not route_with_fallback(other_pins):
-                debug.warning("Escape routing failed for non-dout pins; keeping existing layout pins.")
-        else:
-            # Escape routing can be brittle depending on the computed routing graph
-            # and blockage distribution on a given stack.
-            if not route_with_fallback(pins_to_route):
-                debug.warning("Escape routing failed; keeping existing perimeter pins.")
+        # Escape routing can be brittle depending on the computed routing graph
+        # and blockage distribution on a given stack.
+        if not route_with_fallback(pins_to_route):
+            debug.warning("Escape routing failed; keeping existing perimeter pins.")
 
     def compute_bus_sizes(self):
         """ Compute the independent bus widths shared between two and four bank SRAMs """
@@ -1123,24 +1110,13 @@ class sram_1bank(design, verilog, lef):
                         from_layer=bank_pin.layer,
                         to_layer=dout_promote_layer,
                     )
-                    if OPTS.tech_name == "sky130":
-                        min_area = drc["minarea_{}".format(self.pwr_grid_layers[1])]
-                        pw = round_to_grid(sqrt(min_area))
-                        ph = round_to_grid(min_area / pw)
-                    else:
-                        pw = ph = None
                     self.add_layout_pin_rect_center(
                         text=top_name,
                         layer=dout_promote_layer,
                         offset=bank_pin.center(),
-                        width=pw,
-                        height=ph,
                     )
                 else:
                     if OPTS.tech_name == "sky130":
-                        # Keep dout labels physically on top of the bank dout shapes.
-                        # add_io_pin() creates a tiny promoted pin at center; for this
-                        # flow Magic may treat it as disconnected from extracted top nets.
                         self.copy_layout_pin(self.bank_inst, pin_name, new_name=top_name)
                     else:
                         self.add_io_pin(

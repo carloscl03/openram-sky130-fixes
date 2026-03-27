@@ -20,6 +20,19 @@ import sys
 import os
 import datetime
 
+# --- Desarrollo local: usar SIEMPRE este repo (no el openram de site-packages) ---
+# CRÍTICO: sys.path.insert ANTES de cualquier import que resuelva "openram".
+# Si no, Python usa /usr/local/.../dist-packages/openram → conda en rutas root,
+# pip --user rompiendo volare/openlane, y hierarchy_spice lee SPICE vacío.
+_sram_root = os.path.dirname(os.path.abspath(__file__))
+if os.path.isfile(os.path.join(_sram_root, "__init__.py")) and os.path.isdir(
+        os.path.join(_sram_root, "compiler")):
+    sys.path.insert(0, _sram_root)
+    os.environ.setdefault("OPENRAM_HOME", os.path.join(_sram_root, "compiler"))
+    _sky = os.path.join(_sram_root, "technology", "sky130")
+    if os.path.isdir(_sky):
+        os.environ.setdefault("OPENRAM_TECH", os.path.abspath(_sky) + os.sep)
+
 # You don't need the next two lines if you're sure that openram package is installed
 from common import *
 make_openram_package()
@@ -64,6 +77,8 @@ if not OPTS.netlist_only:
 output_files = ["{0}{1}.{2}".format(OPTS.output_path,
                                     OPTS.output_name, x)
                 for x in output_extensions]
+if getattr(OPTS, 'generate_sym', False):
+    output_files.append("{0}{1}.sym".format(OPTS.output_path, OPTS.output_name))
 debug.print_raw("Output files are: ")
 for path in output_files:
     debug.print_raw(path)
@@ -74,6 +89,18 @@ s = sram()
 
 # Output the files for the resulting SRAM
 s.save()
+
+# Optional: generate xschem symbol from the output netlist
+if getattr(OPTS, 'generate_sym', False):
+    _sym_script = os.path.join(_sram_root, 'sky130', 'scripts', 'gen_xschem_sym.py')
+    _sp_file    = os.path.join(OPTS.output_path, OPTS.output_name + '.sp')
+    _sym_file   = os.path.join(OPTS.output_path, OPTS.output_name + '.sym')
+    if os.path.isfile(_sym_script) and os.path.isfile(_sp_file):
+        import subprocess
+        debug.print_raw("Generating xschem symbol: {}".format(_sym_file))
+        subprocess.run([sys.executable, _sym_script, _sp_file, _sym_file], check=False)
+    else:
+        debug.warning("generate_sym=True but script or .sp not found — skipping")
 
 # Delete temp files etc.
 openram.end_openram()
