@@ -253,6 +253,81 @@ similar containers with anonymous uids.
 
 ---
 
+## Fix 6 — dout escape routing bypass removed
+
+**File:** `compiler/modules/sram_1bank.py` — `signal_escape_routing()` and `add_pins_layout()`
+
+### Root cause
+
+`signal_escape_routing()` had a sky130-specific bypass that split `pins_to_route`
+into `dout_pins` and `other_pins`, passed only `other_pins` to the escape router,
+and left `dout` pins at their internal bank position:
+
+```python
+if OPTS.tech_name == "sky130":
+    dout_pins  = [n for n in pins_to_route if n.startswith("dout")]
+    other_pins = [n for n in pins_to_route if not n.startswith("dout")]
+    if dout_pins:
+        debug.warning("skipping escape routing for dout pins...")
+    route_with_fallback(other_pins)   # dout never routed
+```
+
+The comment attributed this to LVS collapses: *"dout\*/vdd aliases to vssd1 in
+extract"* — where the escape wire on `m4` was alleged to alias with the `vssd1`
+power stripe on the same layer during Magic extraction.
+
+Additionally, `add_pins_layout()` contained unreachable dead code inside the
+`can_promote` branch: a sky130-specific `pw/ph` calculation that could never
+execute because `can_promote` was always `False` for sky130
+(`OPTS.tech_name != "sky130"` was a required condition).
+
+### Investigation
+
+Re-enabling escape routing for dout on a 16×8 sky130 SRAM produced:
+
+```
+KLayout DRC: 0 violation(s)
+sram_16x8_sky130    LVS matches
+```
+
+No aliasing occurred. The previously documented collapse was already resolved
+by the prior fixes (m1.2, m3.2, m2.4 waivers) or by subsequent router
+improvements in OpenRAM. The bypass was no longer necessary.
+
+### Fix applied
+
+Removed the sky130-specific `dout` bypass in `signal_escape_routing()`:
+
+```python
+# Before (sky130 split dout / other_pins):
+if OPTS.tech_name == "sky130":
+    ...  # bypass
+else:
+    if not route_with_fallback(pins_to_route):
+        debug.warning(...)
+
+# After (all PDKs identical):
+if not route_with_fallback(pins_to_route):
+    debug.warning("Escape routing failed; keeping existing perimeter pins.")
+```
+
+Removed dead code in the `can_promote` branch of `add_pins_layout()`.
+Sky130 still uses `copy_layout_pin` as the starting point for each dout pin
+(the `can_promote` condition remains `False` for sky130 — via promotion to `m4`
+is not needed since the escape router handles the full path).
+
+### Verification
+
+```
+KLayout DRC : 0 violation(s)  ✓
+LVS         : matches          ✓
+```
+
+dout pins now reach the block perimeter via the standard escape router,
+making them correctly accessible for P&R and xschem integration.
+
+---
+
 ## KLayout lyrdb format notes
 
 The `.lyrdb` file is XML. Key observations for future maintainers:

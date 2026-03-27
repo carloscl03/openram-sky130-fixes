@@ -28,6 +28,7 @@ Scales to larger memories — fixes are geometry-driven, not hardcoded.
 | 3 | **m2.4** | Via1 enclosure inside PDK word-line strap cells — foundry-certified, waived in KLayout counter | `compiler/verify/magic.py` | ✓ verified |
 | 4 | **Magic DRC noise** | 13 000+ warnings from PDK bitcell internals, downgraded to `info(1)` for sky130 | `compiler/verify/magic.py` | ✓ verified |
 | 5 | **Docker crash** | `getpwuid` KeyError when uid has no `/etc/passwd` entry | `compiler/globals.py` | ✓ verified |
+| 6 | **dout LVS** | dout pins left at internal bank position — escape routing bypass removed; pins now reach block perimeter | `compiler/modules/sram_1bank.py` | ✓ verified |
 
 ---
 
@@ -77,6 +78,7 @@ After a successful compilation, all outputs land in `temp/` (created automatical
 | `temp/<name>.lef` | Abstract LEF for place-and-route |
 | `temp/<name>.lib` | Timing model (Liberty) |
 | `temp/<name>.v` | Verilog behavioral model |
+| `temp/<name>.sym` | xschem symbol — set `generate_sym = True` in config |
 | `temp/<name>.klayout.lyrdb` | KLayout DRC report (XML) |
 
 The `<name>` matches `output_name` in your config file.
@@ -91,6 +93,7 @@ The `<name>` matches `output_name` in your config file.
 | [docs/guide.md](docs/guide.md) | Full compilation guide: expected output, verbose levels, warning explanations |
 | [docs/drc_fixes.md](docs/drc_fixes.md) | Technical root-cause analysis for each fix |
 | [patches/README.md](patches/README.md) | How to apply patches to a fresh upstream OpenRAM |
+| [CHANGELOG.md](CHANGELOG.md) | History of all fixes and additions |
 
 ---
 

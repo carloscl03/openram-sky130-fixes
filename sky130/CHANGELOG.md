@@ -9,6 +9,33 @@ where applicable so they do not affect other PDK targets.
 
 ### Fixed
 
+#### `compiler/modules/sram_1bank.py` — `signal_escape_routing()`
+- **dout pins not escaped to block boundary** — sky130 had an explicit bypass
+  that skipped escape routing for all `dout*` pins, leaving them at their
+  internal bank position instead of the block perimeter. The bypass existed to
+  avoid a previously observed LVS collapse (`dout*/vdd aliases to vssd1` in
+  Magic extraction). Re-enabling escape routing for dout with the current
+  codebase produces KLayout DRC = 0 and LVS matches, confirming the aliasing
+  was already resolved by prior fixes. The bypass and its associated dead code
+  (sky130-specific `pw/ph` calculation inside the unreachable `can_promote`
+  branch) have been removed.
+
+### Added
+
+#### `sky130/scripts/gen_xschem_sym.py`
+- **xschem symbol generator** — new script that parses an OpenRAM SPICE netlist
+  and produces a `.sym` file ready to place in xschem. Pin groups with
+  sequential numeric indices (both bracket `din0[N]` and underscore `dout0_N`
+  notation) are collapsed into single xschem bus pins. Singleton control and
+  power pins remain individual. The SPICE format string in `K{}` lists all
+  subcircuit ports explicitly in order for correct instantiation.
+
+#### `sram_compiler.py` — `generate_sym` hook
+- **Automatic symbol generation** — when the config file sets `generate_sym = True`,
+  `sram_compiler.py` calls `gen_xschem_sym.py` after `s.save()` and writes
+  `<output_name>.sym` alongside the other output files. The `.sym` path is
+  also included in the "Output files are:" list printed at startup.
+
 #### `compiler/globals.py`
 - **Docker `getpwuid` crash** — `getpass.getuser()` raises `KeyError` when the
   container uid has no entry in `/etc/passwd`.
