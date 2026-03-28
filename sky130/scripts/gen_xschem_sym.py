@@ -271,12 +271,12 @@ def generate_sym(cell_name, pins, output_file):
         lbl = label or name
         if cat == 'input':
             out.append(f'B 5 -{PIN_REACH+2.5} {y-2.5} -{PIN_REACH-2.5} {y+2.5} '
-                       f'{{name={name} dir=in name=p{pnum[0]} }}')
+                       f'{{name={name} dir=in}}')
             out.append(f'L 4 -{PIN_REACH} {y} -{BOX_X} {y} {{}}')
             out.append(f'T {{{lbl}}} -{BOX_X+5} {y-4} 0 1 0.2 0.2 {{}}')
         elif cat == 'output':
             out.append(f'B 5 {PIN_REACH-2.5} {y-2.5} {PIN_REACH+2.5} {y+2.5} '
-                       f'{{name={name} dir=out name=p{pnum[0]} }}')
+                       f'{{name={name} dir=out}}')
             out.append(f'L 4 {BOX_X} {y} {PIN_REACH} {y} {{}}')
             out.append(f'T {{{lbl}}} {BOX_X+5} {y-4} 0 0 0.2 0.2 {{}}')
         out.append('')
@@ -294,7 +294,7 @@ def generate_sym(cell_name, pins, output_file):
     for (elem, x) in zip(power_elements, power_xs):
         name = elem['label']
         out.append(f'B 5 {x-2.5} {power_y_pin-2.5} {x+2.5} {power_y_pin+2.5} '
-                   f'{{name={name} dir=inout name=p{pnum[0]} }}')
+                   f'{{name={name} dir=inout}}')
         out.append(f'L 4 {x} {box_top} {x} {power_y_pin} {{}}')
         out.append(f'T {{{name}}} {x} {power_y_pin-12} 0 0 0.15 0.15 {{}}')
         out.append('')

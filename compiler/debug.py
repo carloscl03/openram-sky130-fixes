@@ -62,6 +62,12 @@ def print_raw(str):
     log(str)
 
 
+def print_stderr(msg):
+    """Stderr + compile log, sin prefijo [módulo/función] (p. ej. resumen LVS)."""
+    print(msg, file=sys.stderr)
+    log(msg)
+
+
 def log(str):
     # Add timestamp at the beginning of the string
     timestr = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -103,6 +109,9 @@ def info(lev, str):
     from openram.globals import OPTS
     # 99 is a special never print level
     if lev == 99:
+        return
+    # verbose_level 0: no [module/func] messages; use warning()/error() for user-visible issues.
+    if OPTS.verbose_level == 0:
         return
 
     if (OPTS.verbose_level >= lev):

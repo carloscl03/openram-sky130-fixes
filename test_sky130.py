@@ -47,6 +47,7 @@ _openram_root = os.path.dirname(os.path.abspath(__file__))
 _tech_path = os.path.join(_openram_root, "technology")
 if _tech_path not in sys.path:
     sys.path.insert(0, _tech_path)
+os.environ.setdefault("OPENRAM_TECH", os.path.join(_tech_path, "sky130") + os.sep)
 
 # ── VALIDATION ───────────────────────────────────────────────────────────────
 drc_name      = "magic"

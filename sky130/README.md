@@ -32,6 +32,31 @@ Scales to larger memories — fixes are geometry-driven, not hardcoded.
 
 ---
 
+## Prerequisites
+
+Before compiling, **you must install the SRAM PDK cells** into the technology
+directory. This generates the `.sp` files that the compiler needs:
+
+```bash
+cd /path/to/OpenRAM
+export PDK_ROOT=/foss/pdk       # Docker: already set; adjust for your setup
+make sky130-install
+```
+
+This copies SPICE netlists from the PDK into `technology/sky130/sp_lib/` and
+renames them from `.spice` to `.sp` with the correct pin ordering.
+**Without this step, compilation fails with:**
+```
+ERROR: Custom cell pin names do not match spice file:
+['BL', 'BR', 'VGND', 'VPWR', 'VPB', 'VNB', 'WL'] vs []
+```
+
+> **Note:** the `.sp` files are **generated, not source** — they are not tracked
+> in git. You must re-run `make sky130-install` after cloning, or if `sp_lib/`
+> is ever deleted or corrupted.
+
+---
+
 ## Quickstart — SRAM
 
 ```bash
@@ -171,7 +196,7 @@ python3 sram_compiler.py sky130/configs/my_sram.py
 
 | Tool | Version tested |
 |------|---------------|
-| OpenRAM | v1.2.48 |
+| OpenRAM | v1.2.49 |
 | Magic | 8.3.528 |
 | KLayout | 0.30.2 |
 | Netgen | 1.5.279 |

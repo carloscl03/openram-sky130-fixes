@@ -9,6 +9,23 @@ where applicable so they do not affect other PDK targets.
 
 ### Fixed
 
+#### `compiler/base/vector.py` — numpy ≥ 2.0 compatibility
+- **`TypeError: only 0-dimensional arrays can be converted to Python scalars`** —
+  numpy ≥ 2.0 returns 0-d arrays from GDS operations where OpenRAM expects plain
+  Python floats. `vector.__init__` now calls `.item()` on numpy values before
+  `float()` conversion, making it compatible with both numpy 1.x and 2.x.
+
+#### `common.py` — site-packages shadowing local repo
+- **Compiler loaded system-installed `openram` instead of local patched code** —
+  `make_openram_package()` used `importlib.util.find_spec("openram")` which found
+  the pip-installed package in site-packages before the local repo. Now explicitly
+  removes site-packages paths and forces import from `OPENRAM_HOME/../__init__.py`.
+
+#### `compiler/debug.py` — `verbose_level = 0` guard restored
+- **`info()` messages printed even with `verbose_level = 0`** — the guard that
+  suppresses all `debug.info()` output when `verbose_level == 0` was accidentally
+  lost during a file restore. Re-added.
+
 #### `rom_compiler.py` — OPENRAM_HOME not set
 - **ROM compiler used system-installed package instead of local patched code** —
   `rom_compiler.py` was missing the `OPENRAM_HOME` bootstrap block that
@@ -35,6 +52,15 @@ where applicable so they do not affect other PDK targets.
   was already resolved by prior fixes. The bypass and its associated dead code
   (sky130-specific `pw/ph` calculation inside the unreachable `can_promote`
   branch) have been removed.
+
+### Important — `make sky130-install` prerequisite
+
+The `.sp` files in `technology/sky130/sp_lib/` are **generated** by
+`make sky130-install` (copies `.spice` → `.sp` with correct pin ordering).
+They are not tracked in git. Without them, compilation fails with
+`Custom cell pin names do not match spice file: [...] vs []`.
+Run `export PDK_ROOT=/foss/pdk && make sky130-install` after cloning or if
+`sp_lib/` is ever corrupted.
 
 ### Added
 

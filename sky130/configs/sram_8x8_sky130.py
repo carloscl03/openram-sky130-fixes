@@ -18,9 +18,10 @@ import os
 import sys
 
 # ── MEMORY DIMENSIONS ────────────────────────────────────────────────────────
-word_size    = 8
-num_words    = 8
-num_banks    = 1
+word_size     = 8
+num_words     = 8
+words_per_row = 1   # explicit — prevents OpenRAM from auto-calculating fewer rows
+num_banks     = 1
 num_spare_cols = 1
 num_spare_rows = 1
 
@@ -57,6 +58,11 @@ drc_name      = "magic"
 lvs_name      = "netgen"
 check_lvsdrc  = True
 inline_lvsdrc = False
+
+# ── XSCHEM SYMBOL ─────────────────────────────────────────────────────────────
+# True = generate a .sym file in output_path after compilation
+# The symbol can be placed directly in xschem to integrate the SRAM into a larger design.
+generate_sym  = True
 
 # ── COMPILATION FLAGS ────────────────────────────────────────────────────────
 netlist_only     = False
