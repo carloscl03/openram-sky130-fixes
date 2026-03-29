@@ -444,8 +444,8 @@ Vspare spare_wen0 0 dc 0
 
 | Pin | Type | Typical TB connection |
 |-----|------|-----------------------|
-| `din0[0:8]` | input bus | Resistors to VDD/GND (1 kΩ) for static data |
-| `addr0[0:4]` | input bus | Resistors to VDD/GND for static address |
+| `din0[8:0]` | input bus | Resistors to VDD/GND (1 kΩ) for static data |
+| `addr0[4:0]` | input bus | Resistors to VDD/GND for static address. **addr0[4] must be 0** for 16-word SRAMs (valid addresses: 0–15) |
 | `clk0` | input | `PULSE(0 1.8 5n 100p 100p 4.9n 10n)` — 100 MHz clock |
 | `web0` | input | `PULSE(1.8 0 0 100p 100p 10n 30n)` — read/write/read sequence |
 | `csb0` | input | `dc 0` — always enabled (active low) |
@@ -501,14 +501,22 @@ The `.sp` contains model references like `sky130_fd_pr__nfet_01v8` but does not
 know where the models are. The `tt.spice` loaded by the TB provides the actual
 model parameters. Without it, ngspice cannot simulate.
 
-### Known limitations of the generated symbol
+### Notes on the generated symbol
 
-- **`@pinlist` bus expansion:** xschem expands buses in descending order
-  (`din0[8] din0[7] ... din0[0]`). SPICE connects by position so the mapping
-  is correct, but signal names in ngspice may appear reversed.
-- **Underscore vs bracket dout:** the `.sp` defines `dout0_0` (underscore) but
-  xschem labels them `dout0[0]` (bracket). Positional matching is still correct.
-- **Empty `.subckt` at end of netlist:** xschem generates a redundant `.subckt`
-  definition that ngspice ignores (uses the first definition from `.include`).
+- **Bus ordering:** `gen_xschem_sym.py` reorders the `.sp` top-level ports to
+  descending (`din0[8]...din0[0]`) so they match xschem's `@pinlist` expansion.
+  Internal `.sp` connectivity is unaffected.
+- **`type=primitive`:** prevents xschem from generating an empty `.subckt`
+  wrapper at the end of the netlist. Without this, ngspice would use the empty
+  (last) definition instead of the real one from `.include`, making the SRAM
+  non-functional.
+- **Underscore vs bracket dout:** the `.sp` uses `dout0_0` (underscore) while
+  xschem labels the bus `dout0[8:0]` (bracket). Positional matching is correct.
+- **`spare_wen0`:** must be tied to GND during read cycles. Unlike data bits
+  0–7 (gated by `w_en`), the spare write driver is not gated by the control
+  logic and will corrupt the spare bitline if active during a read.
 - **`singular matrix` warnings:** normal for SRAM — dummy bitcells have floating
   nodes that don't affect circuit operation.
+- **Address range:** for a 16-word SRAM with 5 address bits, only addresses
+  0–15 are valid (`addr0[4]` must be 0). Out-of-range addresses activate no
+  wordline and writes silently fail.

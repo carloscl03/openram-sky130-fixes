@@ -29,6 +29,7 @@ Scales to larger memories — fixes are geometry-driven, not hardcoded.
 | 4 | **Magic DRC noise** | 13 000+ warnings from PDK bitcell internals, downgraded to `info(1)` for sky130 | `compiler/verify/magic.py` | ✓ verified |
 | 5 | **Docker crash** | `getpwuid` KeyError when uid has no `/etc/passwd` entry | `compiler/globals.py` | ✓ verified |
 | 6 | **dout LVS** | dout pins left at internal bank position — escape routing bypass removed; pins now reach block perimeter | `compiler/modules/sram_1bank.py` | ✓ verified |
+| 7 | **xschem sym** | Symbol had reversed buses, empty subcircuit override, off-grid pins — rewritten with `type=primitive`, descending port reorder, grid-aligned layout | `sky130/scripts/gen_xschem_sym.py` | ✓ verified |
 
 ---
 

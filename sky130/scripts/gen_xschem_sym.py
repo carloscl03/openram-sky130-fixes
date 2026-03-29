@@ -100,45 +100,49 @@ def detect_groups(pins):
     return bus_groups, single_idxs
 
 
-# ── Format string builder ────────────────────────────────────────────────────
+# ── .sp port rewriter ────────────────────────────────────────────────────────
 
-def build_format(pins, bus_groups):
+def reorder_sp_ports(sp_file, cell_name, old_pins, new_pins):
     """
-    Build the SPICE format string for the G{} block.
-    - Bracket buses: @{base[lsb:msb]}
-    - Underscore buses: @pin0 @pin1 @pin2 ... (individual, preserves SPICE names)
-    - Singles: @pinname
+    Rewrite the top-level .SUBCKT port declaration in the .sp file so that
+    bus pins are in descending order (matching xschem @pinlist expansion).
+    Only the port declaration is changed; internal net names are unaffected.
     """
-    idx_to_group = {}
-    for key, g in bus_groups.items():
-        for idx, pin, bit in g['members']:
-            idx_to_group[idx] = key
+    if old_pins == new_pins:
+        return
 
-    emitted_groups = set()
-    parts = []
+    with open(sp_file, 'r', errors='replace') as f:
+        content = f.read()
 
-    for i, pin in enumerate(pins):
-        if i in idx_to_group:
-            key = idx_to_group[i]
-            g = bus_groups[key]
-            if key in emitted_groups:
-                continue
-            emitted_groups.add(key)
+    # Build the old multi-line .SUBCKT declaration pattern
+    # Match ".SUBCKT name" followed by continuation lines starting with "+"
+    pat = re.compile(
+        r'^(\.SUBCKT\s+' + re.escape(cell_name) + r')\s*\n'
+        r'((?:\+[^\n]*\n)*)',
+        re.MULTILINE | re.IGNORECASE
+    )
 
-            bits = sorted([b for _, _, b in g['members']])
-            lsb, msb = bits[0], bits[-1]
+    # Format new ports in lines of ~8 pins
+    port_lines = []
+    line = []
+    for p in new_pins:
+        line.append(p)
+        if len(line) >= 8:
+            port_lines.append('+ ' + ' '.join(line))
+            line = []
+    if line:
+        port_lines.append('+ ' + ' '.join(line))
 
-            if g['notation'] == 'bracket':
-                # xschem expands @{base[lsb:msb]} as base[lsb] base[lsb+1] ... base[msb]
-                parts.append(f'@{{{g["base"]}[{lsb}:{msb}]}}')
-            else:
-                # Underscore notation: list each pin individually to preserve SPICE names
-                for _, pname, _ in g['members']:
-                    parts.append(f'@{pname}')
-        else:
-            parts.append(f'@{pin}')
+    new_decl = f'.SUBCKT {cell_name}\n' + '\n'.join(port_lines) + '\n'
 
-    return '"@name ' + ' '.join(parts) + ' @symname"'
+    new_content, count = pat.subn(new_decl, content, count=1)
+    if count == 0:
+        print(f"Warning: could not find .SUBCKT {cell_name} to reorder ports")
+        return
+
+    with open(sp_file, 'w', newline='\n') as f:
+        f.write(new_content)
+    print(f"Reordered .sp ports to descending: {sp_file}")
 
 
 # ── B5 pin name builder ──────────────────────────────────────────────────────
@@ -153,10 +157,10 @@ def build_pin_name(group):
     lsb, msb = bits[0], bits[-1]
 
     if group['notation'] == 'bracket':
-        return f'{group["base"]}[{lsb}:{msb}]'
+        return f'{group["base"]}[{msb}:{lsb}]'
     else:
-        # Comma-separated list of actual SPICE pin names
-        return ','.join(pname for _, pname, _ in group['members'])
+        # Comma-separated list of actual SPICE pin names (descending to match display)
+        return ','.join(pname for _, pname, _ in reversed(group['members']))
 
 
 # ── Layout helpers ────────────────────────────────────────────────────────────
@@ -213,15 +217,20 @@ def generate_sym(cell_name, pins, output_file):
         else:
             left_elements.append(elem)
 
-    # ── Calculate y positions ──────────────────────────────────────────────
+    # ── Calculate y positions (grid-aligned for xschem snap=10) ────────────
 
-    SPACING   = 30
-    BOX_X     = 130
-    PIN_REACH = 150
+    GRID      = 10
+    SPACING   = 40     # pin-to-pin, multiple of GRID
+    BOX_X     = 120    # half-width of box, multiple of GRID
+    PIN_REACH = 140    # x where wire connects, multiple of GRID
+    BOX_PAD   = 20     # padding from outermost pin to box edge
+
+    def snap(v):
+        return round(v / GRID) * GRID
 
     def layout_column(elements):
         total = (len(elements) - 1) * SPACING if elements else 0
-        y = -total // 2
+        y = snap(-total / 2)
         result = []
         for e in elements:
             result.append((e, y))
@@ -232,21 +241,19 @@ def generate_sym(cell_name, pins, output_file):
     right_layout = layout_column(right_elements)
 
     all_ys = ([y for _, y in left_layout] + [y for _, y in right_layout])
-    box_top = (min(all_ys) - SPACING) if all_ys else -60
-    box_bot = (max(all_ys) + SPACING) if all_ys else  60
+    box_top = snap(min(all_ys) - BOX_PAD) if all_ys else -60
+    box_bot = snap(max(all_ys) + BOX_PAD) if all_ys else  60
 
     power_y_pin = box_top - 20
     power_xs    = centered_xs(len(power_elements), 40)
 
-    # ── Format string ──────────────────────────────────────────────────────
-    fmt = build_format(pins, bus_groups)
-
     # ── Write file ─────────────────────────────────────────────────────────
     out = []
 
-    # Header — G{} block (minimal format that xschem reliably instantiates)
+    # Header — G{} block: type=primitive avoids empty subcircuit wrapper,
+    # @pinlist expands pins in B5 definition order (descending = matching .sp)
     out.append('v {xschem version=3.4.5 file_version=1.2}')
-    out.append('G {type=subcircuit')
+    out.append('G {type=primitive')
     out.append('format="@name @pinlist @symname"')
     out.append(f'template="name=x1 symname={cell_name}"}}')
     out.append('V {}')
@@ -288,6 +295,13 @@ def generate_sym(cell_name, pins, output_file):
     with open(output_file, 'w', newline='\n') as f:
         f.write('\n'.join(out) + '\n')
 
+    # Remove any .sch with the same base name so xschem does not generate
+    # an empty subcircuit wrapper that would override the .include definition.
+    sch_file = os.path.splitext(output_file)[0] + '.sch'
+    if os.path.isfile(sch_file):
+        os.remove(sch_file)
+        print(f"Removed stale schematic: {sch_file}")
+
     n_bus    = len(bus_groups)
     n_single = len(single_idxs)
     print(f"Symbol written: {output_file}")
@@ -313,10 +327,33 @@ def main():
 
     print(f"Found subckt: {cell_name}  ({len(pins)} pins)")
 
+    # Reorder bus ports to descending so @pinlist matches xschem wire labels
+    bus_groups, _ = detect_groups(pins)
+    new_pins = []
+    idx_to_group = {}
+    for key, g in bus_groups.items():
+        for idx, _, _ in g['members']:
+            idx_to_group[idx] = key
+
+    emitted = set()
+    for i, pin in enumerate(pins):
+        if i in idx_to_group:
+            key = idx_to_group[i]
+            if key not in emitted:
+                emitted.add(key)
+                g = bus_groups[key]
+                # Add bus members in descending bit order
+                for _, pname, _ in sorted(g['members'], key=lambda x: -x[2]):
+                    new_pins.append(pname)
+        else:
+            new_pins.append(pin)
+
+    reorder_sp_ports(sp_file, cell_name, pins, new_pins)
+
     output_file = sys.argv[2] if len(sys.argv) >= 3 else \
         os.path.splitext(sp_file)[0] + '.sym'
 
-    generate_sym(cell_name, pins, output_file)
+    generate_sym(cell_name, new_pins, output_file)
 
 
 if __name__ == '__main__':

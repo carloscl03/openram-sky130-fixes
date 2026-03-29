@@ -12,11 +12,22 @@ where applicable so they do not affect other PDK targets.
 #### `sky130/scripts/gen_xschem_sym.py` — functional xschem symbol
 - **Symbol was not generating SPICE instance in netlist** — the `.sym` used a
   `K{}` block which xschem did not read. Rewrote to use `G{}` block with
-  `type=subcircuit` and `@pinlist` (sky130 PDK convention). Added required
-  `V{}`, `S{}`, `E{}` sections and forced Unix line endings (`newline='\n'`).
-  Underscore-notation dout pins (`dout0_0...dout0_8`) are listed as
-  comma-separated individual pins in the `B 5` element. The generated symbol
-  now produces a valid SPICE instance when placed in an xschem testbench.
+  `type=primitive` and `@pinlist`. `type=primitive` prevents xschem from
+  generating an empty `.subckt` wrapper that would override the real netlist
+  (ngspice uses the **last** definition when duplicates exist).
+- **Bus bits were reversed** — xschem expands `@pinlist` in the order the B5
+  pin elements appear in the `.sym`, and wires labeled `din0[8:0]` connect in
+  descending order. The `.sp` had ascending ports (`din0[0]...din0[8]`), so
+  SPICE positional mapping reversed every bus. The script now reorders the
+  top-level `.SUBCKT` port declaration in the `.sp` to descending, matching
+  the `@pinlist` expansion. Internal connectivity is unaffected because port
+  names remain the same — only their declaration order changes.
+- **Pin coordinates off-grid** — pin spacing was 30 units, producing
+  coordinates like y=-75 that don't land on xschem's snap=10 / grid=20.
+  Changed to spacing=40, `BOX_X=120`, `PIN_REACH=140` with a `snap()`
+  helper. All pin connection points now fall on multiples of 20.
+- **Stale `.sch` cleanup** — the script removes any `.sch` file with the
+  same base name to prevent xschem from expanding it into an empty subcircuit.
 
 #### `compiler/base/vector.py` — numpy ≥ 2.0 compatibility
 - **`TypeError: only 0-dimensional arrays can be converted to Python scalars`** —
@@ -77,9 +88,11 @@ Run `export PDK_ROOT=/foss/pdk && make sky130-install` after cloning or if
 - **xschem symbol generator** — new script that parses an OpenRAM SPICE netlist
   and produces a `.sym` file ready to place in xschem. Pin groups with
   sequential numeric indices (both bracket `din0[N]` and underscore `dout0_N`
-  notation) are collapsed into single xschem bus pins. Singleton control and
-  power pins remain individual. The SPICE format string in `K{}` lists all
-  subcircuit ports explicitly in order for correct instantiation.
+  notation) are collapsed into single xschem bus pins with descending labels
+  (`din0[8:0]`, `dout0[8:0]`). Singleton control and power pins remain
+  individual. The script also reorders the `.sp` top-level ports to descending
+  so that `@pinlist` expansion matches the SPICE port order. All coordinates
+  are grid-aligned (multiples of 20) for xschem snap=10 / grid=20.
 
 #### `sky130/configs/test_rom_sky130.py` + `sky130/configs/test_rom.hex`
 - **Minimal ROM reference config** — `test_rom_sky130.py` provides a minimal working
