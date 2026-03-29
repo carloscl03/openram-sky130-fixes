@@ -27,3 +27,6 @@ miniconda/
 # Generated PDK views — produced by Magic/KLayout during PDK setup
 technology/sky130/maglef_lib/
 technology/sky130/tech/setup.tcl
+sky130/xschem/
+technology/sky130/mag_lib/
+technology/sky130/tech/.magicrc
