@@ -406,3 +406,109 @@ If it does not match, apply the fix:
 self.x = float(x.item() if hasattr(x, 'item') else x)
 self.y = float(y.item() if hasattr(y, 'item') else y)
 ```
+
+---
+
+## Simulating the SRAM in xschem
+
+The compiler generates a `.sym` file (when `generate_sym = True`) that can be
+placed directly in an xschem testbench for transistor-level simulation with ngspice.
+
+### Setting up the testbench
+
+1. **Insert the symbol:** press `I` → navigate to `temp/<name>.sym`
+2. **Connect pins** with wires and net labels
+3. **Add a `code_shown` block** with:
+
+```spice
+Vvccd1 vccd1 0 dc 1.8
+Vvssd1 vssd1 0 dc 0
+Vcsb0 csb0 0 dc 0
+Vspare spare_wen0 0 dc 0
+.include /foss/designs/OpenRAM/temp/sram_16x8_sky130.sp
+.tran 10p 50n
+```
+
+4. **Add a `code` block** (or use the corner model from xschem) with sky130 models:
+
+```spice
+.param mc_mm_switch=0
+.param mc_pr_switch=0
+.include /headless/pdks/sky130A/libs.tech/ngspice/corners/tt.spice
+.include /headless/pdks/sky130A/libs.tech/ngspice/r+c/res_typical__cap_typical.spice
+.include /headless/pdks/sky130A/libs.tech/ngspice/r+c/res_typical__cap_typical__lin.spice
+.include /headless/pdks/sky130A/libs.tech/ngspice/corners/tt/specialized_cells.spice
+```
+
+### Pin connections
+
+| Pin | Type | Typical TB connection |
+|-----|------|-----------------------|
+| `din0[0:8]` | input bus | Resistors to VDD/GND (1 kΩ) for static data |
+| `addr0[0:4]` | input bus | Resistors to VDD/GND for static address |
+| `clk0` | input | `PULSE(0 1.8 5n 100p 100p 4.9n 10n)` — 100 MHz clock |
+| `web0` | input | `PULSE(1.8 0 0 100p 100p 10n 30n)` — read/write/read sequence |
+| `csb0` | input | `dc 0` — always enabled (active low) |
+| `spare_wen0` | input | `dc 0` — disabled |
+| `dout0[8:0]` | output | Leave open or connect to labels for observation |
+| `vccd1` | power | `dc 1.8` |
+| `vssd1` | power | `dc 0` |
+
+### SRAM timing — write and read
+
+The SRAM captures data on the **rising edge** of `clk0`. The `web0` pin
+(Write Enable Bar, active low) selects the operation:
+
+| web0 | Operation | What happens at clk ↑ |
+|------|-----------|----------------------|
+| 0 V | **WRITE** | `din0` is written to address `addr0` |
+| 1.8 V | **READ** | Address `addr0` is read, result appears on `dout0` |
+
+`web0`, `csb0`, `din0`, and `addr0` must be stable at least **1–2 ns before**
+the rising edge of `clk0` (setup time).
+
+### Example: read → write → read sequence
+
+```
+web0:  PULSE(1.8 0 0 100p 100p 10n 30n)
+clk0:  PULSE(0 1.8 5n 100p 100p 4.9n 10n)
+```
+
+| Time | web0 | clk ↑ at | Operation |
+|------|------|----------|-----------|
+| 0–10 ns | 1.8 V | 5 ns | READ (uninitialized — output undefined) |
+| 10–20 ns | 0 V | 15 ns | WRITE (`din0` → address `addr0`) |
+| 20–30 ns | 1.8 V | 25 ns | READ (should output what was written) |
+
+### Plotting results in ngspice
+
+Signal names with brackets must be quoted:
+
+```
+plot "din0[0]" "din0[1]" "din0[2]" "din0[3]" "net1" "net2"
+plot "dout0[0]" "dout0[1]" "dout0[2]" "dout0[3]"
+```
+
+### How the simulation chain works
+
+| File | Role | References PDK? |
+|------|------|-----------------|
+| `.sym` | Visual symbol with pins — no electrical model | No |
+| `.sp` | Transistor netlist (thousands of MOSFETs) | No (only model names) |
+| `tt.spice` | Transistor models — defines MOSFET behavior | **Yes — this is the PDK** |
+
+The `.sp` contains model references like `sky130_fd_pr__nfet_01v8` but does not
+know where the models are. The `tt.spice` loaded by the TB provides the actual
+model parameters. Without it, ngspice cannot simulate.
+
+### Known limitations of the generated symbol
+
+- **`@pinlist` bus expansion:** xschem expands buses in descending order
+  (`din0[8] din0[7] ... din0[0]`). SPICE connects by position so the mapping
+  is correct, but signal names in ngspice may appear reversed.
+- **Underscore vs bracket dout:** the `.sp` defines `dout0_0` (underscore) but
+  xschem labels them `dout0[0]` (bracket). Positional matching is still correct.
+- **Empty `.subckt` at end of netlist:** xschem generates a redundant `.subckt`
+  definition that ngspice ignores (uses the first definition from `.include`).
+- **`singular matrix` warnings:** normal for SRAM — dummy bitcells have floating
+  nodes that don't affect circuit operation.

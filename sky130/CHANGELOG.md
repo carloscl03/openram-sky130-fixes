@@ -9,6 +9,15 @@ where applicable so they do not affect other PDK targets.
 
 ### Fixed
 
+#### `sky130/scripts/gen_xschem_sym.py` — functional xschem symbol
+- **Symbol was not generating SPICE instance in netlist** — the `.sym` used a
+  `K{}` block which xschem did not read. Rewrote to use `G{}` block with
+  `type=subcircuit` and `@pinlist` (sky130 PDK convention). Added required
+  `V{}`, `S{}`, `E{}` sections and forced Unix line endings (`newline='\n'`).
+  Underscore-notation dout pins (`dout0_0...dout0_8`) are listed as
+  comma-separated individual pins in the `B 5` element. The generated symbol
+  now produces a valid SPICE instance when placed in an xschem testbench.
+
 #### `compiler/base/vector.py` — numpy ≥ 2.0 compatibility
 - **`TypeError: only 0-dimensional arrays can be converted to Python scalars`** —
   numpy ≥ 2.0 returns 0-d arrays from GDS operations where OpenRAM expects plain

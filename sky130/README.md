@@ -132,7 +132,7 @@ All outputs land in `temp/` (created automatically, **gitignored**).
 | `temp/<name>.lef` | Abstract LEF for place-and-route |
 | `temp/<name>.lib` | Timing model (Liberty) |
 | `temp/<name>.v` | Verilog behavioral model |
-| `temp/<name>.sym` | xschem symbol — set `generate_sym = True` in config |
+| `temp/<name>.sym` | xschem symbol for simulation — set `generate_sym = True` in config |
 | `temp/<name>.klayout.lyrdb` | KLayout DRC report (XML) |
 
 ### ROM
@@ -153,7 +153,7 @@ The `<name>` matches `output_name` in your config file.
 | Document | Contents |
 |----------|----------|
 | [configs/README.md](configs/README.md) | Config file template and all options explained |
-| [docs/guide.md](docs/guide.md) | Full compilation guide: expected output, verbose levels, warning explanations |
+| [docs/guide.md](docs/guide.md) | Full compilation guide: expected output, verbose levels, xschem simulation, warning explanations |
 | [docs/drc_fixes.md](docs/drc_fixes.md) | Technical root-cause analysis for each fix |
 | [docs/architecture.md](docs/architecture.md) | Compiler internals: how OpenRAM works, what each file does, compilation pipeline |
 | [patches/README.md](patches/README.md) | How to apply patches to a fresh upstream OpenRAM |
