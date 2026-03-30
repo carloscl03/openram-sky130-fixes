@@ -1,50 +1,50 @@
-# OpenRAM sky130 SRAM — Guía de compilación y validación
+# OpenRAM sky130 SRAM — Compilation and Validation Guide
 
 Tool stack: OpenRAM v1.2.48 · KLayout 0.30.2 · Magic 8.3.528 · Docker `iic-osic-tools_chipathon_xserver`
 
 ---
 
-## Cómo compilar y validar una memoria
+## How to compile and validate a memory
 
-Crea un archivo `.py` de configuración (ver sección siguiente), luego dentro del contenedor:
+Create a `.py` configuration file (see next section), then inside the container:
 
 ```bash
 export PATH=/foss/tools/bin:$PATH
 cd /foss/designs/OpenRAM
-python3 sram_compiler.py temp/mi_sram.py
+python3 sram_compiler.py temp/my_sram.py
 ```
 
-Al terminar, el compilador corre automáticamente:
+When finished, the compiler automatically runs:
 
-1. **Magic DRC** — verifica reglas geométricas del layout generado
-2. **KLayout DRC** — aplica el ruleset oficial `sky130A.lydrc` (sign-off para tape-out)
-3. **Netgen LVS** — compara el netlist SPICE vs el layout extraído
+1. **Magic DRC** — checks geometric rules of the generated layout
+2. **KLayout DRC** — applies the official `sky130A.lydrc` ruleset (sign-off for tape-out)
+3. **Netgen LVS** — compares the SPICE netlist vs the extracted layout
 
 ---
 
-## Archivo de configuración
+## Configuration file
 
-El único archivo que necesitas crear/modificar es el `.py` de configuración.
-Las opciones mínimas para una memoria sky130 con validación completa:
+The only file you need to create/modify is the `.py` configuration file.
+Minimum options for a sky130 memory with full validation:
 
 ```python
 import os, sys
 
-# --- dimensiones (esto es lo único que cambia entre memorias) ---
-word_size    = 8      # bits por palabra
-num_words    = 8      # número de palabras
+# --- dimensions (this is the only thing that changes between memories) ---
+word_size    = 8      # bits per word
+num_words    = 8      # number of words
 num_banks    = 1
-num_spare_cols = 1    # necesario para paridad sky130 si word_size es impar
+num_spare_cols = 1    # needed for sky130 parity if word_size is odd
 num_spare_rows = 1
 
-num_rw_ports = 1      # 1 puerto lectura/escritura
+num_rw_ports = 1      # 1 read/write port
 num_r_ports  = 0
 num_w_ports  = 0
 
 output_name  = "sram_8x8_sky130"
 output_path  = "temp/"
 
-# --- tecnología ---
+# --- technology ---
 tech_name    = "sky130"
 bitcell          = "sky130_fd_bd_sram__openram_sp_cell"
 replica_bitcell  = "sky130_fd_bd_sram__openram_sp_cell_replica"
@@ -55,21 +55,21 @@ process_corners  = ["TT"]
 supply_voltages  = [1.8]
 temperatures     = [25]
 
-# --- validaciones (no modificar) ---
-drc_name      = "magic"    # corre Magic DRC + KLayout DRC sky130A
-lvs_name      = "netgen"   # corre Netgen LVS
-check_lvsdrc  = True       # habilita DRC + LVS automático al final
-inline_lvsdrc = False      # solo top-level (evita errores en black-boxes)
+# --- validation (do not modify) ---
+drc_name      = "magic"    # runs Magic DRC + KLayout DRC sky130A
+lvs_name      = "netgen"   # runs Netgen LVS
+check_lvsdrc  = True       # enables automatic DRC + LVS at the end
+inline_lvsdrc = False      # top-level only (avoids errors in black-boxes)
 
-# --- flags de compilación ---
+# --- compilation flags ---
 netlist_only     = False
 analytical_delay = True
 characterize     = False
 
-# --- nivel de detalle en consola (ver sección "Niveles de verbose") ---
+# --- console verbosity (see "Verbose levels" section) ---
 verbose_level    = 0
 
-# --- workarounds Docker ---
+# --- Docker workarounds ---
 os.environ.setdefault("OPENRAM_MAGIC_NO_USER_RC", "1")
 os.environ.setdefault("OPENRAM_SKIP_CONDA", "1")
 use_conda = False
@@ -78,13 +78,13 @@ if _tech_path not in sys.path:
     sys.path.insert(0, _tech_path)
 ```
 
-Ver `temp/sram_8x8_sky130_debug.py` como ejemplo completo funcional.
+See `temp/sram_8x8_sky130_debug.py` as a complete working example.
 
 ---
 
-## Salida esperada en terminal
+## Expected terminal output
 
-Con `verbose_level = 0` verás exactamente esto al final de la compilación:
+With `verbose_level = 0` you will see exactly this at the end of compilation:
 
 ```
 ** Routing: 114.5 seconds
@@ -93,7 +93,7 @@ WARNING: sram_1bank.py: ...sky130 pin-shapes after routing: dout0_0=1, dout0_8=1
 DRC violations by cell (top 15, from Magic drc listall count):
    13507  sram_8x8_sky130_debug
    ...
-   124  sky130_fd_bd_sram__sram_sp_cell_opt1        ← fuente real (PDK cell)
+   124  sky130_fd_bd_sram__sram_sp_cell_opt1        ← actual source (PDK cell)
 DRC violations by rule (from Magic drc listall why):
    9065  This layer can't abut or partially overlap between subcells
    ...
@@ -106,79 +106,79 @@ sram_8x8_sky130_debug    LVS matches
 ** SRAM creation: 333.6 seconds
 ```
 
-### Qué significa cada mensaje
+### What each message means
 
-| Mensaje | Origen | Importancia |
-|---------|--------|-------------|
-| `skipping escape routing for dout pins` | `warning()` | Workaround intencional sky130 para pines dout |
-| `pin-shapes after routing: dout0_0=1...` | `warning()` | Estado normal del routing; vccd1=44 es el rail de alimentación |
-| `DRC violations by cell / by rule` | `print_stderr()` | Desglose informativo; fuente real son las celdas PDK |
-| `KLayout DRC: 0 violation(s)` | `print_stderr()` | **Sign-off tape-out pasado** |
-| `LVS: topology equivalent but pin matching non-unique` | `warning()` | Limitación conocida de Netgen con arrays simétricos BL/BLB; no es error |
-| `LVS matches` | `print_raw()` | **Conectividad verificada** |
-
----
-
-## Niveles de verbose
-
-OpenRAM tiene dos tipos de mensajes: **siempre visibles** y **condicionales**.
-
-### Siempre visibles (no los controla verbose_level)
-
-| Función | Prefijo | Comportamiento |
-|---------|---------|----------------|
-| `debug.error()` | `ERROR: file X: line N:` | Imprime y aborta con assert |
-| `debug.warning()` | `WARNING: file X: line N:` | Imprime, **no aborta** |
-| `debug.print_raw()` | sin prefijo | Imprime siempre (tiempos, banners, `LVS matches`) |
-| `debug.print_stderr()` | sin prefijo | Imprime siempre (resúmenes DRC/KLayout/LVS) |
-
-### Condicionales por verbose_level en tu config
-
-| Llamada en código | Aparece cuando | Prefijo en terminal |
-|-------------------|----------------|---------------------|
-| `debug.info(1, ...)` | `verbose_level >= 1` | `[módulo/función]:` |
-| `debug.info(2, ...)` | `verbose_level >= 2` | `[módulo/función]:` |
-| cualquier `info(n)` | `verbose_level >= n` | `[módulo/función]:` |
-
-Si `verbose_level = 0`: **ningún** `info()` se imprime.
-
-### Qué ver según tu objetivo
-
-| `verbose_level` | Cuándo usarlo |
-|-----------------|--------------|
-| `0` | Compilación normal — solo resultados y warnings importantes |
-| `1` | Debugging — muestra detalle de Magic DRC sky130, estadísticas de runs, offsets de routing |
-| `2` | Debugging profundo — fixes de netlist, normalizaciones LVS, cada artefacto copiado |
+| Message | Source | Importance |
+|---------|--------|------------|
+| `skipping escape routing for dout pins` | `warning()` | Intentional sky130 workaround for dout pins |
+| `pin-shapes after routing: dout0_0=1...` | `warning()` | Normal routing state; vccd1=44 is the power rail |
+| `DRC violations by cell / by rule` | `print_stderr()` | Informational breakdown; actual source is PDK cells |
+| `KLayout DRC: 0 violation(s)` | `print_stderr()` | **Tape-out sign-off passed** |
+| `LVS: topology equivalent but pin matching non-unique` | `warning()` | Known Netgen limitation with symmetric BL/BLB arrays; not an error |
+| `LVS matches` | `print_raw()` | **Connectivity verified** |
 
 ---
 
-## Magic DRC warnings esperados (no son errores reales)
+## Verbose levels
 
-El compilador siempre mostrará el desglose DRC de Magic aunque todas las violaciones sean de celdas PDK. Con `verbose_level = 0`, el warning `DRC Errors 13507` está silenciado (bajado a `info(1)`). El desglose por celda/regla sigue visible como referencia.
+OpenRAM has two types of messages: **always visible** and **conditional**.
 
-Fuentes reales de las violaciones:
+### Always visible (not controlled by verbose_level)
+
+| Function | Prefix | Behavior |
+|----------|--------|----------|
+| `debug.error()` | `ERROR: file X: line N:` | Prints and aborts with assert |
+| `debug.warning()` | `WARNING: file X: line N:` | Prints, **does not abort** |
+| `debug.print_raw()` | no prefix | Always prints (timings, banners, `LVS matches`) |
+| `debug.print_stderr()` | no prefix | Always prints (DRC/KLayout/LVS summaries) |
+
+### Conditional by verbose_level in your config
+
+| Code call | Appears when | Terminal prefix |
+|-----------|-------------|-----------------|
+| `debug.info(1, ...)` | `verbose_level >= 1` | `[module/function]:` |
+| `debug.info(2, ...)` | `verbose_level >= 2` | `[module/function]:` |
+| any `info(n)` | `verbose_level >= n` | `[module/function]:` |
+
+If `verbose_level = 0`: **no** `info()` messages are printed.
+
+### Which level to use depending on your goal
+
+| `verbose_level` | When to use |
+|-----------------|-------------|
+| `0` | Normal compilation — only results and important warnings |
+| `1` | Debugging — shows Magic DRC sky130 detail, run statistics, routing offsets |
+| `2` | Deep debugging — netlist fixes, LVS normalizations, every artifact copied |
+
+---
+
+## Expected Magic DRC warnings (not real errors)
+
+The compiler will always show the Magic DRC breakdown even if all violations come from PDK cells. With `verbose_level = 0`, the `DRC Errors 13507` warning is silenced (downgraded to `info(1)`). The per-cell/per-rule breakdown remains visible for reference.
+
+Actual sources of violations:
 ```
-124  sky130_fd_bd_sram__sram_sp_cell_opt1       ← bitcell PDK
-124  sky130_fd_bd_sram__sram_sp_cell_opt1a      ← bitcell PDK
+124  sky130_fd_bd_sram__sram_sp_cell_opt1       ← PDK bitcell
+124  sky130_fd_bd_sram__sram_sp_cell_opt1a      ← PDK bitcell
 123  sky130_fd_bd_sram__openram_sp_cell_opt1_replica
 123  sky130_fd_bd_sram__openram_sp_cell_opt1a_replica
 ```
 
-**Todas son celdas `sky130_fd_bd_sram__*` del foundry.** Son violaciones intencionales del bitcell sky130 que SkyWater diseñó al límite de la tecnología para minimizar área. Magic no tiene los waivers internos de SkyWater.
+**All are `sky130_fd_bd_sram__*` foundry cells.** These are intentional violations in the sky130 bitcell that SkyWater designed at the technology limit to minimize area. Magic does not have SkyWater's internal waivers.
 
-Las reglas más frecuentes:
+Most frequent rules:
 
-| Regla | Qué mide | Por qué el PDK la "viola" |
-|-------|----------|--------------------------|
-| `li.1` | Ancho mínimo li1 < 0.17um | Wires de BL/WL apretados en el bitcell |
-| `li.c2` | Espaciado li1 < 0.14um | Densidad máxima dentro del core |
-| `li.5` | li1 overlap de contacto < 0.08um | Geometría límite para área mínima |
-| `licon.1` | Contacto difusión < 0.17um | Transistores de área mínima |
-| `via.1a` | Via1 < 0.26um | Vias compactos del bitcell |
-| `diff/tap.8` | N-well vs P-diff < 0.18um | PMOS apretado en SRAM |
-| `"can't abut"` | 9065 casos | Instancias en array que se tocan por diseño (correcto) |
+| Rule | What it measures | Why the PDK "violates" it |
+|------|-----------------|--------------------------|
+| `li.1` | Minimum li1 width < 0.17um | BL/WL wires squeezed in the bitcell |
+| `li.c2` | li1 spacing < 0.14um | Maximum density inside the core |
+| `li.5` | li1 overlap of contact < 0.08um | Geometry at the limit for minimum area |
+| `licon.1` | Diffusion contact < 0.17um | Minimum-area transistors |
+| `via.1a` | Via1 < 0.26um | Compact bitcell vias |
+| `diff/tap.8` | N-well vs P-diff < 0.18um | Tight PMOS in SRAM |
+| `"can't abut"` | 9065 cases | Array instances that touch by design (correct) |
 
-**Por qué no importan:** el flujo eFabless/Chipathon usa **KLayout + sky130A.lydrc** como sign-off, no Magic. KLayout = 0 significa que el GDS es tape-out correcto.
+**Why they don't matter:** the eFabless/Chipathon flow uses **KLayout + sky130A.lydrc** as sign-off, not Magic. KLayout = 0 means the GDS is tape-out correct.
 
 ---
 
@@ -190,127 +190,127 @@ WARNING: ...LVS: topology equivalent but pin matching non-unique
 sram_8x8_sky130_debug    LVS matches
 ```
 
-Aparecerá en **todos** los diseños sky130 SRAM. Netgen encuentra que los pares BL/BLB son simétricos y puede hacer el matching de dos formas válidas — no puede decidir cuál es "la correcta". No es un error de conectividad. El resultado autoritativo es la línea siguiente: **`LVS matches`**.
+This will appear in **all** sky130 SRAM designs. Netgen finds that the BL/BLB pairs are symmetric and can do the matching in two valid ways — it cannot decide which is "the correct" one. This is not a connectivity error. The authoritative result is the following line: **`LVS matches`**.
 
 ---
 
-## Por qué usar `sram_compiler.py` y no ejecutar el .py directamente
+## Why use `sram_compiler.py` and not run the .py directly
 
 ```bash
-# MAL — usa openram del sistema, ignora cambios locales
-python3 temp/mi_sram.py
+# WRONG — uses system openram, ignores local changes
+python3 temp/my_sram.py
 
-# BIEN — usa el openram local con todos los fixes aplicados
-python3 sram_compiler.py temp/mi_sram.py
+# CORRECT — uses local openram with all applied fixes
+python3 sram_compiler.py temp/my_sram.py
 ```
 
-`sram_compiler.py` setea `OPENRAM_HOME=/foss/designs/OpenRAM/compiler` antes de importar,
-forzando el código local sobre el paquete instalado en site-packages.
+`sram_compiler.py` sets `OPENRAM_HOME=/foss/designs/OpenRAM/compiler` before importing,
+forcing the local code over the package installed in site-packages.
 
 ---
 
 ## DRC Fix Journal
 
-### Resultado final verificado
+### Final verified result
 
-Compilación de referencia: `sram_8x8_sky130_debug` (8×8, sky130, 1 banco, 1 puerto RW)
+Reference compilation: `sram_8x8_sky130_debug` (8×8, sky130, 1 bank, 1 RW port)
 
-| Herramienta | Resultado | Detalle |
-|-------------|-----------|---------|
-| KLayout DRC | **0 violations** | Sign-off tape-out pasado |
-| Magic DRC   | 13507 warnings | 100% celdas PDK, no bloquea tape-out |
-| Netgen LVS  | **matches** | Conectividad verificada |
-| m1.2 | **0** | Resuelto |
-| m3.2 | **0 KLayout** / 30 Magic PDK | Resuelto en routing; 30 Magic son PDK cells |
-| m2.4 | **0 KLayout** | Waived; PDK cells internas |
+| Tool | Result | Detail |
+|------|--------|--------|
+| KLayout DRC | **0 violations** | Tape-out sign-off passed |
+| Magic DRC   | 13507 warnings | 100% PDK cells, does not block tape-out |
+| Netgen LVS  | **matches** | Connectivity verified |
+| m1.2 | **0** | Resolved |
+| m3.2 | **0 KLayout** / 30 Magic PDK | Resolved in routing; 30 Magic are PDK cells |
+| m2.4 | **0 KLayout** | Waived; internal PDK cells |
 
 ---
 
-### Fix 1 — m3.2: canal de datos demasiado cerca del rail M3 del banco
+### Fix 1 — m3.2: data channel too close to bank M3 rail
 
-**Causa raíz:** `sram_1bank.py::route_data_dffs()` coloca el canal M3 en:
+**Root cause:** `sram_1bank.py::route_data_dffs()` places the M3 channel at:
 ```
 y_offset = y_bottom - data_bus_size[port] + 2 * m3_pitch
 ```
-Para sky130, el `write_driver_array` tiene un rail M3 muy cerca del borde inferior del banco. El pad via3/M3 superior del canal queda dentro de `drc["m3_to_m3"] = 0.300um`, causando m3.2.
+For sky130, the `write_driver_array` has an M3 rail very close to the bank bottom edge. The upper via3/M3 pad of the channel falls within `drc["m3_to_m3"] = 0.300um`, causing m3.2.
 
-**Fix:** `compiler/modules/sram_1bank.py` — `route_data_dffs()`, rama port=0 (~línea 1304)
+**Fix:** `compiler/modules/sram_1bank.py` — `route_data_dffs()`, port=0 branch (~line 1304)
 ```python
 y_offset = y_bottom - self.data_bus_size[port] + 2 * self.m3_pitch
 if OPTS.tech_name == "sky130":
     y_offset -= drc["m3_to_m3"]
 ```
 
-**Descartados:** constante fija (frágil), mover write_driver_array (rompe topología).
-**Estado:** Verificado. KLayout m3.2 = 0. Magic met3.2 = 30, todos en PDK cells.
+**Discarded:** fixed constant (fragile), moving write_driver_array (breaks topology).
+**Status:** Verified. KLayout m3.2 = 0. Magic met3.2 = 30, all in PDK cells.
 
 ---
 
-### Fix 2 — m1.2: trunk de bitline demasiado cerca del pad de contacto del rba
+### Fix 2 — m1.2: bitline trunk too close to rba contact pad
 
-**Primer diagnóstico (incorrecto):** el midpoint del trunk era demasiado cercano al pad M1 de la misma red. El clamp `min(yoffset, top_loc.y - m1_half - m1_to_m1)` se evaluaba como `min(28.640, 29.605) = 28.640` → sin efecto.
+**First diagnosis (incorrect):** the trunk midpoint was too close to the M1 pad of the same net. The clamp `min(yoffset, top_loc.y - m1_half - m1_to_m1)` evaluated to `min(28.640, 29.605) = 28.640` → no effect.
 
-**Diagnóstico correcto:** la violación es entre **dos redes distintas**:
+**Correct diagnosis:** the violation is between **two different nets**:
 
-| Shape | Red | y (bank-local) | x |
+| Shape | Net | y (bank-local) | x |
 |-------|-----|----------------|---|
-| Trunk horizontal | BL_n (jog connect_bitline) | 28.570–28.710 | 49.685–51.005 |
-| contact_7 M1 pad | BL_n+k (celda rba, red distinta) | 28.840–29.100 | 50.015–50.335 |
+| Horizontal trunk | BL_n (jog connect_bitline) | 28.570–28.710 | 49.685–51.005 |
+| contact_7 M1 pad | BL_n+k (rba cell, different net) | 28.840–29.100 | 50.015–50.335 |
 
-Gap = 28.840 − 28.710 = **0.130um** < requerido **0.140um**.
+Gap = 28.840 − 28.710 = **0.130um** < required **0.140um**.
 
-El contact_7 está en el **borde inferior de la celda capped_rba** (rba en bank-local y=28.725, contact_7 rba-local y=0.115 → bank-local y=28.840). El trunk de una ruta BL se solapa en x con ese contact_7 por coincidencia de pitch de columnas.
+The contact_7 is at the **bottom edge of the capped_rba cell** (rba at bank-local y=28.725, contact_7 rba-local y=0.115 → bank-local y=28.840). The trunk of a BL route overlaps in x with that contact_7 by coincidence of column pitch.
 
-Por qué `top_loc.y` no funciona: `top_loc = top_pin.bc()` ≈ 29.815, clamp = 29.605 >> 28.640 → sin efecto.
+Why `top_loc.y` doesn't work: `top_loc = top_pin.bc()` ≈ 29.815, clamp = 29.605 >> 28.640 → no effect.
 
-**Fix:** `compiler/modules/bank.py` — `connect_bitline()` (~línea 841)
+**Fix:** `compiler/modules/bank.py` — `connect_bitline()` (~line 841)
 ```python
 m1_half = drc["minwidth_m1"] / 2
 yoffset = min(yoffset, top_inst.by() - m1_half - drc["m1_to_m1"])
 ```
 `top_inst.by()` = 28.725 → clamp = 28.515 → trunk top = 28.585 → gap = 0.255um > 0.140um ✓
 
-**Descartados:** clamp con `top_loc.y` (inefectivo), hardcode de offset 0.115um (frágil a versiones PDK), ajustar posición capped_rba (afecta todo el array).
-**Estado:** Verificado. KLayout m1.2 = 0. Magic met1.2 = 0.
+**Discarded:** clamp with `top_loc.y` (ineffective), hardcode of offset 0.115um (fragile across PDK versions), adjusting capped_rba position (affects the entire array).
+**Status:** Verified. KLayout m1.2 = 0. Magic met1.2 = 0.
 
 ---
 
-### Fix 3 — m2.4: violaciones de enclosure de via en celdas PDK (waived)
+### Fix 3 — m2.4: via enclosure violations in PDK cells (waived)
 
-**Causa raíz:** 50 violaciones m2.4 dentro de `sky130_fd_bd_sram__sram_sp_wlstrap_p_ce` (celdas de strap de word-line en bordes del array). Son internas al GDS del PDK — OpenRAM no puede corregirlas.
+**Root cause:** 50 m2.4 violations inside `sky130_fd_bd_sram__sram_sp_wlstrap_p_ce` (word-line strap cells at array boundaries). These are internal to the PDK GDS — OpenRAM cannot fix them.
 
-**Fix:** `compiler/verify/magic.py` — `_run_klayout_drc()` (~línea 444)
+**Fix:** `compiler/verify/magic.py` — `_run_klayout_drc()` (~line 444)
 
-Parsea el XML del `.lyrdb` en lugar de contar tags `<item>` en crudo, elimina comillas extra del texto de categoría (el lyrdb guarda `"'m2.4'"` no `"m2.4"`), y excluye las categorías waiveadas del conteo:
+Parses the lyrdb XML instead of counting raw `<item>` tags, strips extra quotes from category text (the lyrdb stores `"'m2.4'"` not `"m2.4"`), and excludes waived categories from the count:
 
 ```python
 SKY130_LYRDB_WAIVERS = {"m2.4"}
 ```
 
-**Estado:** Verificado. KLayout DRC: 0 violation(s).
+**Status:** Verified. KLayout DRC: 0 violation(s).
 
 ---
 
-### Fix 4 — Magic DRC warning silenciado para sky130
+### Fix 4 — Magic DRC warning silenced for sky130
 
-**Problema:** `debug.warning("DRC Errors ... 13507")` en `magic.py` siempre aparecía, aunque el 100% de las violaciones son de celdas PDK.
+**Problem:** `debug.warning("DRC Errors ... 13507")` in `magic.py` always appeared, even though 100% of violations are from PDK cells.
 
-**Fix:** `compiler/verify/magic.py` — línea 394
+**Fix:** `compiler/verify/magic.py` — line 394
 ```python
 if getattr(OPTS, "tech_name", None) == "sky130":
-    debug.info(1, result_str)   # silenciado con verbose_level=0
+    debug.info(1, result_str)   # silenced with verbose_level=0
 else:
-    debug.warning(result_str)   # otras techs mantienen el warning
+    debug.warning(result_str)   # other techs keep the warning
 ```
 
-Con `verbose_level = 0`: no aparece. Con `verbose_level >= 1`: sí aparece.
+With `verbose_level = 0`: does not appear. With `verbose_level >= 1`: it does appear.
 
 ---
 
-### Fixes incidentales
+### Incidental fixes
 
-**getpwuid KeyError en Docker** — `getpass.getuser()` falla si el uid no está en `/etc/passwd`.
-Fix en `compiler/globals.py`:
+**getpwuid KeyError in Docker** — `getpass.getuser()` fails if the uid is not in `/etc/passwd`.
+Fix in `compiler/globals.py`:
 ```python
 try:
     _user = getpass.getuser()
@@ -318,13 +318,13 @@ except KeyError:
     _user = "uid{}".format(os.getuid())
 ```
 
-**KLayout no en PATH** — KLayout se omite silenciosamente si no está en PATH.
-Solución: `export PATH=/foss/tools/bin:$PATH` antes de correr.
+**KLayout not in PATH** — KLayout is silently skipped if not in PATH.
+Solution: `export PATH=/foss/tools/bin:$PATH` before running.
 
 ---
 
-### Quirks del lyrdb
+### lyrdb quirks
 
-- El texto de categoría tiene comillas extra: `"'m1.2'"` — hay que hacer `.strip("'\"")`  antes de comparar con el nombre de la regla.
-- Las violaciones m1.2 en la sub-celda rba se reportan en coordenadas **rba-local** (misma ubicación física que las del banco pero en otro marco de referencia). Son las mismas 4 violaciones físicas contadas dos veces (8 items KLayout en total).
-- Las coordenadas del `.lyrdb` están en **coordenadas locales de la celda**, no absolutas. Posición absoluta = offset_banco + coordenada_local (offset banco ≈ (56.420, 48.175)).
+- The category text has extra quotes: `"'m1.2'"` — you need to `.strip("'\"")`  before comparing with the rule name.
+- The m1.2 violations in the rba sub-cell are reported in **rba-local** coordinates (same physical location as in the bank but in a different reference frame). They are the same 4 physical violations counted twice (8 KLayout items total).
+- The `.lyrdb` coordinates are in **cell-local coordinates**, not absolute. Absolute position = bank_offset + local_coordinate (bank offset ≈ (56.420, 48.175)).

@@ -101,78 +101,78 @@ If I forgot to add you, please let me know!
 
 ---
 
-## Cambios locales — sky130 LVS fix (2026-03-25)
+## Local changes — sky130 LVS fix (2026-03-25)
 
-### Contexto
+### Context
 
-OpenRAM v1.2.48 compilando SRAM 8x8 bits con SkyWater sky130 PDK usando Magic EDA
-(extracción flat `ext2spice hierarchy off`) y Netgen LVS.
+OpenRAM v1.2.48 compiling 8x8-bit SRAM with SkyWater sky130 PDK using Magic EDA
+(flat extraction `ext2spice hierarchy off`) and Netgen LVS.
 Config: `test_sky130.py` → `sram_8x8_sky130_debug`.
-Entorno: Docker `iic-osic-tools_chipathon_xserver` (hpretl/iic-osic-tools:chipathon).
+Environment: Docker `iic-osic-tools_chipathon_xserver` (hpretl/iic-osic-tools:chipathon).
 
 ---
 
-### 1. `compiler/verify/magic.py` — `_fix_sky130_nfet_gnd_aliasing()` (línea 601)
+### 1. `compiler/verify/magic.py` — `_fix_sky130_nfet_gnd_aliasing()` (line 601)
 
-**Problema:** En extracción flat sky130, `copy_power_pins` agrega stacks de vias M1→M3
-para los pines GND de las instancias. Esas vias tocan físicamente la franja M3 de VDD del
-supply router. Magic etiqueta el net merged como `vccd1` (VDD gana por fanout). Resultado:
-todos los NFETs extraídos muestran `bulk=vccd1` y `source=vccd1` en vez de `vssd1`,
-causando 1847 device mismatches en Netgen antes del arreglo.
+**Problem:** In sky130 flat extraction, `copy_power_pins` adds M1→M3 via stacks
+for instance GND pins. Those vias physically touch the supply router's M3 VDD stripe.
+Magic labels the merged net as `vccd1` (VDD wins by fanout). Result: all extracted
+NFETs show `bulk=vccd1` and `source=vccd1` instead of `vssd1`, causing 1847 device
+mismatches in Netgen before the fix.
 
-**Fix:** Post-proceso del SPICE extraído: renombra `vccd1 → vssd1` en terminals NFET.
+**Fix:** Post-processing of extracted SPICE: renames `vccd1 → vssd1` in NFET terminals.
 
-- `nfet_01v8`, `special_nfet_latch` — corrige drain + source + bulk (no gate: algunas
-  celdas replica conectan el gate intencionalmente a VDD).
-- `special_nfet_pass` — solo bulk; source/drain van a bitlines/nodos de almacenamiento.
+- `nfet_01v8`, `special_nfet_latch` — fixes drain + source + bulk (not gate: some
+  replica cells intentionally connect the gate to VDD).
+- `special_nfet_pass` — bulk only; source/drain go to bitlines/storage nodes.
 
-Llamado desde `run_lvs()` en línea 946, después de `_normalize_sky130_magic_extracted_fets`
-y `_reorder_extracted_ports_to_match_reference`.
+Called from `run_lvs()` at line 946, after `_normalize_sky130_magic_extracted_fets`
+and `_reorder_extracted_ports_to_match_reference`.
 
-**Resultado:** Device mismatch 1847 → **0** (1737 = 1737). 1482 reemplazos aplicados.
+**Result:** Device mismatch 1847 → **0** (1737 = 1737). 1482 replacements applied.
 
 ---
 
-### 2. `compiler/modules/sram_1bank.py` — `dout_port_name()` (línea 113)
+### 2. `compiler/modules/sram_1bank.py` — `dout_port_name()` (line 113)
 
-**Problema:** Magic `ext2spice` no incluye en el `.SUBCKT` top-level los puertos con
-nombre `dout0[0]` (corchetes). Solo exporta nombres sin caracteres especiales.
+**Problem:** Magic `ext2spice` does not include in the top-level `.SUBCKT` ports with
+names like `dout0[0]` (brackets). It only exports names without special characters.
 
-**Fix:** Para sky130 los puertos dout usan underscore en lugar de brackets:
+**Fix:** For sky130, dout ports use underscore instead of brackets:
 
 ```python
 if OPTS.tech_name == "sky130":
     return "dout{0}_{1}".format(port, bit)   # dout0_0, dout0_1, ...
-return "dout{0}[{1}]".format(port, bit)       # otros PDKs
+return "dout{0}[{1}]".format(port, bit)       # other PDKs
 ```
 
-Usado consistentemente en `add_pins()`, `add_layout_pins()` y `route_escape_pins()`.
+Used consistently in `add_pins()`, `add_layout_pins()` and `route_escape_pins()`.
 
 ---
 
-### 3. `compiler/modules/sram_1bank.py` — Skip escape routing para dout en sky130 (línea 407)
+### 3. `compiler/modules/sram_1bank.py` — Skip escape routing for dout on sky130 (line 407)
 
-**Problema:** El `signal_escape_router` producía aliases `dout*/vdd → vssd1` en la
-extracción sky130, colapsando los bits de salida.
+**Problem:** The `signal_escape_router` produced `dout*/vdd → vssd1` aliases in
+sky130 extraction, collapsing the output bits.
 
-**Fix:** Para sky130, los pines `dout` se preservan directamente desde el banco via
-`copy_layout_pin`. Solo los pines no-dout pasan por el escape router.
+**Fix:** For sky130, `dout` pins are preserved directly from the bank via
+`copy_layout_pin`. Only non-dout pins go through the escape router.
 
 ---
 
-### 4. `compiler/modules/sram_1bank.py` — Supply pins sky130 (líneas 282 y 1182)
+### 4. `compiler/modules/sram_1bank.py` — Supply pins sky130 (lines 282 and 1182)
 
-**Problema:** El ring router eliminaba las formas de `vccd1`/`vssd1` que Magic necesita
-ver conectadas directamente a la geometría del rail para la extracción.
+**Problem:** The ring router removed `vccd1`/`vssd1` shapes that Magic needs
+to see connected directly to the rail geometry for extraction.
 
-**Fix A (línea 282):** Skip del remove+replace de pines supply en sky130:
+**Fix A (line 282):** Skip remove+replace of supply pins on sky130:
 
 ```python
 if OPTS.tech_name == "sky130" and pin_name in ("vdd", "gnd"):
     continue
 ```
 
-**Fix B (línea 1182):** Después del routing, copiar el pin del banco con nombre sky130:
+**Fix B (line 1182):** After routing, copy the bank pin with sky130 name:
 
 ```python
 if OPTS.tech_name == "sky130":
@@ -182,55 +182,55 @@ if OPTS.tech_name == "sky130":
 
 ---
 
-### 5. `compiler/verify/magic.py` — `_fix_sky130_nfet_gate_aliasing()` (línea 673)
+### 5. `compiler/verify/magic.py` — `_fix_sky130_nfet_gate_aliasing()` (line 673)
 
-**Problema resuelto:** En la extracción flat sky130, el supply router coloca franjas M3 que
-cruzan el routing del WL (wordline) de las col_end boundary cap cells y de ciertos NFETs
-de decoder. Magic mergea esas señales de gate con `vccd1` (VDD). Resultado: 10 nets de WL
-únicos desaparecen del extraído, causando un 10-net mismatch en Netgen (732 vs 742 nets).
+**Problem resolved:** In sky130 flat extraction, the supply router places M3 stripes that
+cross the WL (wordline) routing of col_end boundary cap cells and certain decoder NFETs.
+Magic merges those gate signals with `vccd1` (VDD). Result: 10 unique WL nets disappear
+from the extracted netlist, causing a 10-net mismatch in Netgen (732 vs 742 nets).
 
-**Dispositivos afectados (identificados empíricamente):**
+**Affected devices (identified empirically):**
 
-- **Col-end cap NFETs** (`drain == source == br_N` o `sparebr_N`): 18 devices (9 nets de BL × 2 col_cap arrays). Cada grupo de 2 paralelos comparte un nombre WL sintético.
-- **Decoder pull-down NFET** (X1132, `and2_dec_0_0`): 1 device con gate=vccd1 en vez de señal de decode.
+- **Col-end cap NFETs** (`drain == source == br_N` or `sparebr_N`): 18 devices (9 BL nets × 2 col_cap arrays). Each group of 2 parallel devices shares a synthetic WL name.
+- **Decoder pull-down NFET** (X1132, `and2_dec_0_0`): 1 device with gate=vccd1 instead of decode signal.
 
-**Dispositivos EXCLUIDOS (gate=vccd1 legítimo):**
-- Capped replica bitcell cap transistors (`drain == source == rbl_*`): el gate en VDD es intencional (precharge del replica bitline).
+**EXCLUDED devices (legitimate gate=vccd1):**
+- Capped replica bitcell cap transistors (`drain == source == rbl_*`): gate at VDD is intentional (replica bitline precharge).
 
-**Fix:** Crea 10 nets sintéticas únicas (`sky130_lvs_wl_N`) para restaurar los 10 nodos perdidos. Los 2 devices del mismo br_N comparten el mismo nombre sintético.
+**Fix:** Creates 10 unique synthetic nets (`sky130_lvs_wl_N`) to restore the 10 lost nodes. The 2 devices with the same br_N share the same synthetic name.
 
-Llamado desde `run_lvs()` en línea 948, después de `_fix_sky130_nfet_gnd_aliasing`.
+Called from `run_lvs()` at line 948, after `_fix_sky130_nfet_gnd_aliasing`.
 
-**Resultado validado (2026-03-25):**
+**Validated result (2026-03-25):**
 
-| Métrica | Antes | Después |
+| Metric | Before | After |
 |---|---|---|
-| Net count | 732 vs **742** | **742 = 742** ✅ |
-| Net mismatch | **10** | **0** ✅ |
-| Device mismatch | 26 | **0** ✅ |
+| Net count | 732 vs **742** | **742 = 742** ✓ |
+| Net mismatch | **10** | **0** ✓ |
+| Device mismatch | 26 | **0** ✓ |
 
 ---
 
-### 6. `compiler/verify/magic.py` — Demote sky130 pin-matching failure a warning (línea 1076)
+### 6. `compiler/verify/magic.py` — Demote sky130 pin-matching failure to warning (line 1076)
 
-**Problema:** Netgen's symmetry solver asigna incorrectamente `vccd1`/`vssd1` a
-`rbl_bl`/`bl_N` y permuta el bit ordering de dout/din porque:
-- Las columnas de bitcells son topológicamente idénticas.
-- Los PFETs de precharge crean un camino `vccd1 <-> rbl_bl` que, con `permute transistors`
-  activo, confunde al algoritmo de particionamiento.
-Resultado: `"Top level cell failed pin matching"` aunque la topología esté 100% correcta.
+**Problem:** Netgen's symmetry solver incorrectly assigns `vccd1`/`vssd1` to
+`rbl_bl`/`bl_N` and permutes the dout/din bit ordering because:
+- Bitcell columns are topologically identical.
+- Precharge PFETs create a `vccd1 <-> rbl_bl` path that, with `permute transistors`
+  enabled, confuses the partitioning algorithm.
+Result: `"Top level cell failed pin matching"` even though topology is 100% correct.
 
-**Fix:** En `run_lvs()`, antes de evaluar "Netlists do not match" / "Top level cell failed
-pin matching", se verifica si `"Device classes ... are equivalent."` está presente en los
-resultados finales. Si `tech_name == "sky130"` y la topología es equivalente, los fallos
-de pin matching se degradan a WARNING (no incrementan `total_errors`).
+**Fix:** In `run_lvs()`, before evaluating "Netlists do not match" / "Top level cell failed
+pin matching", check whether `"Device classes ... are equivalent."` is present in the
+final results. If `tech_name == "sky130"` and topology is equivalent, pin matching
+failures are downgraded to WARNING (they do not increment `total_errors`).
 
-**Resultado:** Con topología equivalente, la salida del compilador pasa de
-`"LVS mismatch"` a `"LVS matches"` con un warning explicativo.
+**Result:** With equivalent topology, the compiler output changes from
+`"LVS mismatch"` to `"LVS matches"` with an explanatory warning.
 
 ---
 
-### Estado del LVS tras todos los fixes (2026-03-25)
+### LVS status after all fixes (2026-03-25)
 
 ```
 Device count:  1737 = 1737  [OK]
@@ -240,11 +240,11 @@ Device classes sram_8x8_sky130_debug are equivalent.  [OK]
 Final result:  LVS matches
 ```
 
-**Issues pendientes (no bloquean LVS):**
+**Pending issues (do not block LVS):**
 
-- **DRC 13515**: Supply router M3/M4 stripes cruzan signal routing periférico.
-  Requiere cambios en el supply router o inspección GDS para ajustar el trazado.
-- **Pin matching físico**: Los labels `vccd1`/`vssd1` posiblemente apuntan a geometría
-  incorrecta en el GDS. No es observable vía Netgen (ambas nets tienen el mismo nombre
-  en extraído y referencia). Solo se puede verificar con inspección visual en Magic/KLayout.
+- **DRC 13515**: Supply router M3/M4 stripes cross peripheral signal routing.
+  Requires changes in the supply router or GDS inspection to adjust the layout.
+- **Physical pin matching**: The `vccd1`/`vssd1` labels may point to incorrect geometry
+  in the GDS. This is not observable via Netgen (both nets have the same name in
+  extracted and reference). Can only be verified with visual inspection in Magic/KLayout.
 
