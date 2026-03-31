@@ -197,7 +197,7 @@ python3 sram_compiler.py sky130/configs/my_sram.py
 
 | Tool | Version tested |
 |------|---------------|
-| OpenRAM | v1.2.49 |
+| OpenRAM | v1.2.48 + sky130 patches (this fork) |
 | Magic | 8.3.528 |
 | KLayout | 0.30.2 |
 | Netgen | 1.5.279 |

@@ -1,10 +1,16 @@
 # How to run OpenRAM without mixing the `pip` package with the repo
 
-**Detailed report (Sky130, LVS, diagnostics, repo changes, `sky130_sram_macros_old` repo):** see **[README_SKY130.md](./README_SKY130.md)**.
+> **Note:** This guide assumes you are running inside the
+> `iic-osic-tools_chipathon_xserver` Docker container, where OpenRAM may be
+> pre-installed as a pip package. If you are running from a fresh clone
+> without a system-installed `openram`, you can skip directly to the
+> [quickstart in sky130/README.md](./sky130/README.md).
 
 ---
 
-If you installed `openram` with pip **and** have a copy of the code in `/foss/designs/OpenRAM`, Python may load the package from **`/usr/local/lib/.../site-packages/openram`**. This causes:
+If you installed `openram` with pip **and** have a copy of the code in your
+designs directory, Python may load the package from
+`site-packages/openram` instead of your local patched code. This causes:
 
 - `install_conda` trying to create `miniconda` in **non-writable** paths
 - `OPENRAM_TECH` undefined or pointing to the pip package
@@ -12,25 +18,36 @@ If you installed `openram` with pip **and** have a copy of the code in `/foss/de
 
 ## Recommended solution
 
-From the repository root:
+Always use the compiler script from the repository root:
 
 ```bash
-cd /foss/designs/OpenRAM
-python3 sram_compiler.py test_sky130.py
+cd /path/to/OpenRAM
+python3 sram_compiler.py sky130/configs/my_sram.py
 ```
 
-`sram_compiler.py` prepends the repo directory to `sys.path` so that **this** tree is **always** used.
+`sram_compiler.py` prepends the repo directory to `sys.path` so that the
+local patched code is **always** used instead of any system-installed package.
 
-Explicit alternative:
+Docker example (`iic-osic-tools_chipathon_xserver`):
 
 ```bash
+export PATH=/foss/tools/bin:$PATH
 cd /foss/designs/OpenRAM
-PYTHONPATH=/foss/designs/OpenRAM python3 sram_compiler.py test_sky130.py
+python3 sram_compiler.py sky130/configs/my_sram.py
 ```
 
-## Conda in Docker (read-only)
+Explicit alternative (any environment):
 
-In `test_sky130.py`, `use_conda = False` uses `magic`/`netgen` from `PATH` without installing Miniconda.
+```bash
+cd /path/to/OpenRAM
+PYTHONPATH=$(pwd) python3 sram_compiler.py sky130/configs/my_sram.py
+```
+
+## Conda in Docker (read-only filesystem)
+
+Set `use_conda = False` in your config to use `magic`/`netgen` from `PATH`
+without installing Miniconda. The reference configs in `sky130/configs/`
+already do this.
 
 To force skipping conda from the environment:
 
@@ -38,11 +55,17 @@ To force skipping conda from the environment:
 export OPENRAM_SKIP_CONDA=1
 ```
 
-## Useful variables
+## Environment variables
 
 | Variable | Usage |
 |----------|-------|
-| `PDK_ROOT` | Root of open_pdks (required for sky130 `technology/__init__.py`) |
+| `PDK_ROOT` | Root of open_pdks (required for sky130 `technology/__init__.py`). Docker: `/foss/pdks`. |
 | `OPENRAM_TECH` | Set automatically when using the local repo via `sram_compiler.py` |
-| `OPENRAM_MAGIC_NO_USER_RC` | Prevents loading another PDK from `~/.magicrc` before sky130 |
-| `OPENRAM_TMP` | Magic/Netgen temporary directory (defaults to `/tmp/openram_designer_<pid>_temp/`). If you set it to the same path as `output_path` in the config (e.g. `.../OpenRAM/temp/`), verification artifacts stay there; otherwise, the compiler **also** copies `*.extracted.spice`, `*.lvs.report` and `*.lvs.out` alongside the `output_path` when it differs from `OPENRAM_TMP`. |
+| `OPENRAM_MAGIC_NO_USER_RC` | Set to `1` to prevent loading `~/.magicrc` with a different PDK before sky130 |
+| `OPENRAM_SKIP_CONDA` | Set to `1` to skip Miniconda installation |
+| `OPENRAM_TMP` | Magic/Netgen temporary directory (defaults to `/tmp/openram_<user>_<pid>_temp/`). Verification artifacts are copied to `output_path` after completion. |
+
+## See also
+
+- [sky130/README.md](./sky130/README.md) — Quickstart and compilation guide
+- [sky130/docs/guide.md](./sky130/docs/guide.md) — Full guide with troubleshooting
