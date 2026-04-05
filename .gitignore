@@ -30,3 +30,6 @@ technology/sky130/tech/setup.tcl
 sky130/xschem/
 technology/sky130/mag_lib/
 technology/sky130/tech/.magicrc
+
+# Claude Code
+CLAUDE.md
